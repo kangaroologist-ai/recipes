@@ -30,11 +30,12 @@ for k, s in STEPS.items():
         assert c in ING or c in STEPS, f"{k}: unknown input {c}"
     s["phase"] = s.get("phase") or ("wait" if s.get("passive") else "prep")
     assert s["phase"] in ("prep", "wait", "heat"), f"{k}: phase must be prep/wait/heat"
-TREE = {k: s for k, s in STEPS.items() if s["in"]}
-uses = [c for s in TREE.values() for c in s["in"]]
+uses = [c for s in STEPS.values() for c in s["in"]]
 dup = sorted({c for c in uses if uses.count(c) > 1})
 assert not dup, f"used by more than one step (split them): {dup}"
 used = set(uses)
+# table = steps that consume something or are consumed; a step with neither only shows on the timeline
+TREE = {k: s for k, s in STEPS.items() if s["in"] or k in used}
 roots = [k for k in TREE if k not in used]
 assert len(roots) == 1, f"need exactly one final step, got {roots}"
 root = roots[0]
@@ -45,16 +46,21 @@ for k, i in ING.items():
         assert len(i["nut"]) == 6, f"{k}: nut needs 6 numbers [kcal,P,C,F,fiber,Na]"
 
 # ---------- table layout ----------
-col = {k: 0 for k in ING}
-def colof(k):
-    if k not in col:
-        col[k] = 1 + max(colof(c) for c in TREE[k]["in"])
-    return col[k]
-colof(root)
+# Steps sit as far right as possible (one column left of the step they feed), so a side branch
+# like "heat the pan with butter" lines up under the step it runs alongside; ingredient cells and
+# input-less steps start at column 0 and stretch right to meet their parent.
 parent = {c: k for k, s in TREE.items() for c in s["in"]}
+depth = {root: 0}
+def walk(k):
+    for c in TREE[k]["in"] if k in TREE else []:
+        depth[c] = depth[k] + 1
+        walk(c)
+walk(root)
+LAST = 1 + max(depth[k] for k in TREE)
+col = {k: (0 if k in ING or not TREE[k]["in"] else LAST - depth[k]) for k in depth}
 leaves = []
 def dfs(k):
-    if k in ING:
+    if k in ING or not TREE[k]["in"]:
         leaves.append(k)
     else:
         for c in TREE[k]["in"]:
@@ -63,7 +69,7 @@ dfs(root)
 memo = {}
 def leafset(k):
     if k not in memo:
-        memo[k] = [k] if k in ING else [l for c in TREE[k]["in"] for l in leafset(c)]
+        memo[k] = [k] if (k in ING or not TREE[k]["in"]) else [l for c in TREE[k]["in"] for l in leafset(c)]
     return memo[k]
 
 def qty(i):
@@ -102,26 +108,35 @@ def recipe_table(cls_on=True):
     return '<table class="cfe">' + "".join(rows) + "</table>"
 
 # ---------- schedule ----------
+# One cook: hands-on steps never overlap, in the order they are listed. Passive steps (resting,
+# preheating, soaking) run alongside whatever the cook is doing.
 start, end = {}, {k: 0 for k in ING}
-def endof(k):
-    if k not in end:
-        s = STEPS[k]
-        deps = [endof(c) for c in s["in"] + s["after"]]
-        if s.get("end_with"):
-            start[k] = endof(s["end_with"]) - (s.get("min") or 0)
-        elif s.get("start_with"):
-            start[k] = endof(s["start_with"]) - (STEPS[s["start_with"]].get("min") or 0)
-        else:
-            start[k] = max(deps, default=0)
-        end[k] = start[k] + (s.get("min") or 0)
-    return end[k]
-for k in STEPS:
-    endof(k)
+cook_free = 0
+for k, s in STEPS.items():
+    m = s.get("min") or 0
+    for d in s["in"] + s["after"]:
+        assert d in end, f"{k}: list it after {d}"
+    ready = max((end[d] for d in s["in"] + s["after"]), default=0)
+    if s.get("end_with") or s.get("start_with"):
+        ref = s.get("end_with") or s.get("start_with")
+        assert ref in end, f"{k}: list it after {ref}"
+        assert s.get("passive"), f"{k}: end_with/start_with only for passive steps (preheat, soak...)"
+        start[k] = end[ref] - m if s.get("end_with") else start[ref]
+        assert start[k] >= ready, f"{k}: would start before its inputs are ready"
+    else:
+        start[k] = ready
+        if not s.get("passive"):
+            start[k] = max(start[k], cook_free)
+    if not s.get("passive"):
+        cook_free = start[k] + m
+    end[k] = start[k] + m
 total = max(end.values())
 order = sorted(STEPS, key=lambda k: (start[k], col.get(k, 0)))
 TICK = next(t for t in (1, 2, 5, 10, 15, 30, 60) if total / t <= 8)
 ticks = list(range(0, total + 1, TICK))
 if ticks[-1] != total:
+    if total - ticks[-1] < TICK / 2 + 0.01 and len(ticks) > 1:  # keep the end label from colliding with the last tick
+        ticks.pop()
     ticks.append(total)
 
 # ---------- nutrition ----------
@@ -190,7 +205,7 @@ def timeline():
     for k in order:
         s = STEPS[k]
         m = s.get("min") or 0
-        cls = "bar wait" if s["phase"] == "wait" else "bar"
+        cls = "bar wait" if s.get("passive") else "bar"
         out.append(f'<div class="lab">{E(s["action"])}</div><div class="track">{grid}'
                    f'<div class="{cls}" style="left:{pct(start[k]):.2f}%;width:{max(pct(m), 1.5):.2f}%" '
                    f'title="{start[k]}–{end[k]} min"></div></div>')
@@ -286,7 +301,7 @@ else:
     g = [FENCE + "mermaid", "gantt", "dateFormat mm", "axisFormat %M", "todayMarker off"]
     for k in order:
         s = STEPS[k]
-        g.append(f"  {s['action']} :{'done, ' if s['phase'] == 'wait' else ''}{k}, {start[k]:02d}, {s.get('min') or 0}m")
+        g.append(f"  {s['action']} :{'done, ' if s.get('passive') else ''}{k}, {start[k]:02d}, {s.get('min') or 0}m")
     g.append(FENCE)
     doc = (f"# {r['title']}\n\n{summary_line()}\n\n## 配方表\n\n{recipe_table(cls_on=False)}\n\n"
            f"## 时间线\n\n" + "\n".join(g) + "\n")

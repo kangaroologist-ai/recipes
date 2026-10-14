@@ -12,6 +12,6 @@ ingredients:
 steps:
   wet:   {action: 搅匀蛋液, in: [yog, milk, egg, allu], min: 2}
   soak:  {action: 面包两面浸透, in: [wet, bread], min: 2, passive: true}
-  heat:  {phase: heat, action: 中小火化黄油, min: 2, end_with: soak}
-  fry:   {phase: heat, action: 煎第一面, in: [soak, butter], after: [heat], min: 3}
+  heat:  {phase: heat, action: 热锅化黄油, in: [butter], min: 2, passive: true, end_with: soak}
+  fry:   {phase: heat, action: 煎第一面, in: [soak, heat], min: 3}
   flip:  {phase: heat, action: 翻面再煎, in: [fry], min: 3}

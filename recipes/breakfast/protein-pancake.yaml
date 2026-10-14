@@ -17,6 +17,6 @@ steps:
   wet:   {action: 打散, in: [egg, yog, milk], min: 1}
   mix:   {action: 翻拌至无干粉, in: [dry, wet], min: 1}
   rest:  {action: 静置, in: [mix], min: 7, passive: true}
-  heat:  {phase: heat, action: 小火预热锅, min: 3, end_with: rest}
-  fry:   {phase: heat, action: 小火盖盖煎, in: [rest, butter], after: [heat], min: 2}
+  heat:  {phase: heat, action: 小火热锅抹黄油, in: [butter], min: 3, passive: true, end_with: rest}
+  fry:   {phase: heat, action: 小火盖盖煎, in: [rest, heat], min: 2}
   flip:  {phase: heat, action: 翻面再煎, in: [fry], min: 1}
