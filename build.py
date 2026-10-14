@@ -21,9 +21,9 @@ SKILL_DIR = ROOT / "skills/recipe-table"
 DIST = ROOT / "dist"
 
 
-def render(src: Path, fmt: str) -> None:
-    out = src.with_suffix("." + fmt)
-    subprocess.run([sys.executable, str(RENDER), str(src), str(out), "--" + fmt], check=True,
+def render(src: Path, fmt: str, suffix: str = "", *extra: str) -> None:
+    out = src.with_name(src.stem + suffix + "." + ("png" if "png" in fmt else fmt))
+    subprocess.run([sys.executable, str(RENDER), str(src), str(out), "--" + fmt, *extra], check=True,
                    stdout=subprocess.DEVNULL)
 
 
@@ -70,8 +70,11 @@ def package_skill():
 if __name__ == "__main__":
     fmts = ["md"] + ([] if "--no-png" in sys.argv else ["png"])
     for src in sorted(RECIPES.rglob("*.yaml")):
-        for fmt in fmts:
-            render(src, fmt)
+        render(src, "md")
+        if "png" in fmts:
+            render(src, "png")
+            render(src, "table-png", "-table-zh")
+            render(src, "table-png", "-table-en", "--en")
         print("rendered", src.relative_to(ROOT))
     update_readme()
     print("packaged", package_skill().relative_to(ROOT))

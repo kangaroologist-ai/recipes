@@ -16,7 +16,8 @@
 ```
 recipes/<分类>/<名字>.yaml   源文件，改配方只改这个
 recipes/<分类>/<名字>.md     GitHub 上看的版本（自动生成）
-recipes/<分类>/<名字>.png    分享用图片（自动生成）
+recipes/<分类>/<名字>.png    完整图片：配方表 + 时间线 + 营养（自动生成）
+recipes/<分类>/<名字>-table-zh.png / -table-en.png   只有配方表的中/英文图片（自动生成）
 skills/recipe-table/         Claude skill：把食谱整理成上面的格式
 dist/recipe-table.skill      打包好的 skill（自动生成）
 ```

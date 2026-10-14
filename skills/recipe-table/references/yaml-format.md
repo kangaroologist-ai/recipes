@@ -66,6 +66,18 @@ fry:  {phase: heat, action: 煎, in: [rest, heat], min: 2}
 - 热锅、预热这类步骤结束的时刻，正好是要用它的那一步开始的时刻。
 - 时长合理：比如 10 g 黄油在热锅里 30 秒就化，“化黄油 2 分钟”其实是热锅的时间，步骤名要写清楚是“热锅化黄油”。
 
+## 英文版字段
+
+导出英文图片（`--table-png --en`）时用，写 YAML 时顺手一起填：
+
+| 位置 | 字段 |
+|---|---|
+| 顶层 | `title_en`；有 `serving_name` 时加 `serving_name_en`（复数，如 `slices`），没有时默认 `serving` |
+| 材料 | `name_en`；有 `note` 时加 `note_en`；单位不是 g/ml/tsp 这类通用单位时可加 `unit_en`（个 → 空，撮 → pinch，片 → slices 已内置） |
+| 步骤 | `action_en`，含逗号时要加引号，比如 `action_en: "Flip, cook"` |
+
+英文名同样不写品牌，动作尽量简短（几个词），格子太窄时会换行。
+
 ## 营养计算
 
 - 营养表的每份值 = 所有 `nut` 相加 ÷ `servings`，四舍五入保留一位小数。

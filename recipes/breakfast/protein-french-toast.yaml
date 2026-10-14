@@ -1,17 +1,19 @@
 title: 高蛋白法式吐司
+title_en: High-Protein French Toast
 servings: 3
 serving_name: 片
+serving_name_en: slices
 # nut = 本配方用量对应的 [热量kcal, 蛋白质g, 碳水g, 脂肪g, 膳食纤维g, 钠mg]
 ingredients:
-  yog:    {name: 0 脂希腊酸奶, qty: 50, unit: g, nut: [31.5, 5.5, 2.25, 0, 0, 19], src: label}
-  milk:   {name: 全脂牛奶, qty: 50, unit: ml, nut: [30, 1.6, 2.4, 1.6, 0, 20], src: "USDA#01077"}
-  egg:    {name: 鸡蛋, qty: 3, unit: 个, nut: [234, 18, 3, 15, 0, 186], src: "USDA#01129"}
-  allu:   {name: 阿洛酮糖, qty: 20, unit: g, nut: [0, 0, 0, 0, 0, 0], src: FDA 按 0 kcal 计}
-  bread:  {name: 高蛋白低碳面包, qty: 3, unit: 片, note: 约 125 g, nut: [234, 34.2, 18.6, 0, 9.6, 120], src: label}
-  butter: {name: 含盐黄油, qty: 10, unit: g, nut: [72, 0.1, 0, 8.1, 0, 64], src: "USDA#01001"}
+  yog:    {name: 0 脂希腊酸奶, name_en: 0% fat Greek yogurt, qty: 50, unit: g, nut: [31.5, 5.5, 2.25, 0, 0, 19], src: label}
+  milk:   {name: 全脂牛奶, name_en: Whole milk, qty: 50, unit: ml, nut: [30, 1.6, 2.4, 1.6, 0, 20], src: "USDA#01077"}
+  egg:    {name: 鸡蛋, name_en: Eggs, qty: 3, unit: 个, nut: [234, 18, 3, 15, 0, 186], src: "USDA#01129"}
+  allu:   {name: 阿洛酮糖, name_en: Allulose, qty: 20, unit: g, nut: [0, 0, 0, 0, 0, 0], src: FDA 按 0 kcal 计}
+  bread:  {name: 高蛋白低碳面包, name_en: High-protein low-carb bread, note_en: about 125 g, qty: 3, unit: 片, note: 约 125 g, nut: [234, 34.2, 18.6, 0, 9.6, 120], src: label}
+  butter: {name: 含盐黄油, name_en: Salted butter, qty: 10, unit: g, nut: [72, 0.1, 0, 8.1, 0, 64], src: "USDA#01001"}
 steps:
-  wet:   {action: 搅匀蛋液, in: [yog, milk, egg, allu], min: 2}
-  soak:  {action: 面包两面浸透, in: [wet, bread], min: 2, passive: true}
-  heat:  {phase: heat, action: 热锅化黄油, in: [butter], min: 2, passive: true, end_with: soak}
-  fry:   {phase: heat, action: 煎第一面, in: [soak, heat], min: 3}
-  flip:  {phase: heat, action: 翻面再煎, in: [fry], min: 3}
+  wet:   {action: 搅匀蛋液, action_en: Whisk custard, in: [yog, milk, egg, allu], min: 2}
+  soak:  {action: 面包两面浸透, action_en: Soak both sides, in: [wet, bread], min: 2, passive: true}
+  heat:  {phase: heat, action: 热锅化黄油, action_en: "Heat pan, melt butter", in: [butter], min: 2, passive: true, end_with: soak}
+  fry:   {phase: heat, action: 煎第一面, action_en: Fry first side, in: [soak, heat], min: 3}
+  flip:  {phase: heat, action: 翻面再煎, action_en: "Flip, fry", in: [fry], min: 3}

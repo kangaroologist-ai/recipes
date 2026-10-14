@@ -1,22 +1,24 @@
 title: 乳清蛋白松饼
+title_en: Whey Protein Pancake
 servings: 1
+serving_name_en: serving
 # nut = 本配方用量对应的 [热量kcal, 蛋白质g, 碳水g, 脂肪g, 膳食纤维g, 钠mg]
 ingredients:
-  whey:    {name: 乳清蛋白粉, qty: 25, unit: g, nut: [90, 20.2, 1.5, 0.2, 0, 153], src: label 分离乳清 1勺31g 折算}
-  flour:   {name: 面粉, qty: 20, unit: g, nut: [73, 2.1, 15.3, 0.2, 0.5, 0], src: "USDA#168936"}
-  allu:    {name: 阿洛酮糖, qty: 10, unit: g, nut: [0, 0, 0, 0, 0, 0], src: FDA 按 0 kcal 计}
-  cinn:    {name: 肉桂粉, qty: 0.5, unit: tsp, nut: [3, 0, 1.1, 0, 0.7, 0], src: USDA 肉桂粉 约1.3g 估}
-  bp:      {name: 泡打粉, qty: 0.5, unit: tsp, nut: [1, 0, 0.6, 0, 0, 180], src: "USDA#172804 约2.3g"}
-  salt:    {name: 盐, qty: 1, unit: 撮, nut: [0, 0, 0, 0, 0, 155], src: 约0.4g 估}
-  egg:     {name: 鸡蛋, qty: 1, unit: 个, nut: [78, 6, 1, 5, 0, 62], src: "USDA#01129"}
-  yog:     {name: 无糖希腊酸奶, qty: 55, unit: g, nut: [33, 5.5, 2.2, 0, 0, 18], src: "USDA#01287"}
-  milk:    {name: 全脂牛奶, qty: 25, unit: ml, nut: [15, 0.8, 1.2, 0.8, 0, 10], src: "USDA#01077"}
-  butter:  {name: 含盐黄油, qty: 3, unit: g, nut: [22, 0, 0, 2.4, 0, 19], src: "USDA#01001"}
+  whey:    {name: 乳清蛋白粉, name_en: Whey protein powder, qty: 25, unit: g, nut: [90, 20.2, 1.5, 0.2, 0, 153], src: label 分离乳清 1勺31g 折算}
+  flour:   {name: 面粉, name_en: Flour, qty: 20, unit: g, nut: [73, 2.1, 15.3, 0.2, 0.5, 0], src: "USDA#168936"}
+  allu:    {name: 阿洛酮糖, name_en: Allulose, qty: 10, unit: g, nut: [0, 0, 0, 0, 0, 0], src: FDA 按 0 kcal 计}
+  cinn:    {name: 肉桂粉, name_en: Ground cinnamon, qty: 0.5, unit: tsp, nut: [3, 0, 1.1, 0, 0.7, 0], src: USDA 肉桂粉 约1.3g 估}
+  bp:      {name: 泡打粉, name_en: Baking powder, qty: 0.5, unit: tsp, nut: [1, 0, 0.6, 0, 0, 180], src: "USDA#172804 约2.3g"}
+  salt:    {name: 盐, name_en: Salt, qty: 1, unit: 撮, nut: [0, 0, 0, 0, 0, 155], src: 约0.4g 估}
+  egg:     {name: 鸡蛋, name_en: Egg, qty: 1, unit: 个, nut: [78, 6, 1, 5, 0, 62], src: "USDA#01129"}
+  yog:     {name: 无糖希腊酸奶, name_en: Plain Greek yogurt, qty: 55, unit: g, nut: [33, 5.5, 2.2, 0, 0, 18], src: "USDA#01287"}
+  milk:    {name: 全脂牛奶, name_en: Whole milk, qty: 25, unit: ml, nut: [15, 0.8, 1.2, 0.8, 0, 10], src: "USDA#01077"}
+  butter:  {name: 含盐黄油, name_en: Salted butter, qty: 3, unit: g, nut: [22, 0, 0, 2.4, 0, 19], src: "USDA#01001"}
 steps:
-  dry:   {action: 拌匀, in: [whey, flour, allu, cinn, bp, salt], min: 1}
-  wet:   {action: 打散, in: [egg, yog, milk], min: 1}
-  mix:   {action: 翻拌至无干粉, in: [dry, wet], min: 1}
-  rest:  {action: 静置, in: [mix], min: 7, passive: true}
-  heat:  {phase: heat, action: 小火热锅抹黄油, in: [butter], min: 3, passive: true, end_with: rest}
-  fry:   {phase: heat, action: 小火盖盖煎, in: [rest, heat], min: 2}
-  flip:  {phase: heat, action: 翻面再煎, in: [fry], min: 1}
+  dry:   {action: 拌匀, action_en: Whisk dry, in: [whey, flour, allu, cinn, bp, salt], min: 1}
+  wet:   {action: 打散, action_en: Beat wet, in: [egg, yog, milk], min: 1}
+  mix:   {action: 翻拌至无干粉, action_en: Fold until no dry flour, in: [dry, wet], min: 1}
+  rest:  {action: 静置, action_en: Rest, in: [mix], min: 7, passive: true}
+  heat:  {phase: heat, action: 小火热锅抹黄油, action_en: "Heat pan, butter it", in: [butter], min: 3, passive: true, end_with: rest}
+  fry:   {phase: heat, action: 小火盖盖煎, action_en: "Cook covered, low heat", in: [rest, heat], min: 2}
+  flip:  {phase: heat, action: 翻面再煎, action_en: "Flip, cook", in: [fry], min: 1}

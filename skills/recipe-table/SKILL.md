@@ -42,7 +42,9 @@ description: 把食谱（文字、链接、YouTube 字幕、截图）整理成 C
 
 同一个命令换最后的参数：
 
-- `--png`：分享用图片（需要 `wkhtmltoimage` 和 Noto Sans CJK 字体）。生成后先用 Read 看一眼有没有错位，再用 SendUserFile 发出去。
+- `--png`：完整图片（标题、配方表、时间线、营养表）。
+- `--table-png`：只有标题、摘要行和配方表的图片，适合发给别人。加 `--en` 出英文版，需要 YAML 里有 `*_en` 字段（见 `references/yaml-format.md`），缺了脚本会列出来。
+- 用户要“图片”时默认给三张：`--png`、`--table-png`、`--table-png --en`。图片需要 `wkhtmltoimage` 和 Noto Sans CJK 字体；生成后先用 Read 看一眼有没有文字重叠或错位，再用 SendUserFile 发出去。
 - `--md`：GitHub Markdown（合并格表格 + Mermaid 甘特图 + 营养表），放进 repo 用。
 - `--page`：独立 HTML 页面。
 

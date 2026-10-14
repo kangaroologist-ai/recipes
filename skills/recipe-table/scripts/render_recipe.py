@@ -4,6 +4,8 @@ usage: render_recipe.py recipe.yaml OUT [--widget|--page|--md|--png]
   --page    standalone HTML page
   --md      GitHub markdown (raw HTML table + mermaid gantt + nutrition table)
   --png     shareable image (needs wkhtmltoimage + a CJK font)
+  --table-png  image with only title, summary line and the recipe table
+  --en      (add to --table-png) English version, from the *_en fields in the YAML
 """
 import html
 import os
@@ -15,12 +17,34 @@ from decimal import ROUND_HALF_UP, Decimal
 import yaml
 
 src, out = sys.argv[1], sys.argv[2]
-mode = (sys.argv[3] if len(sys.argv) > 3 else "--widget").lstrip("-")
+flags = sys.argv[3:]
+EN = "--en" in flags
+mode = next((f for f in flags if f != "--en"), "--widget").lstrip("-")
 r = yaml.safe_load(open(src, encoding="utf-8"))
 ING, STEPS = r["ingredients"], r["steps"]
 SERV = r.get("servings") or 1
-SNAME = r.get("serving_name", "份")
 E = html.escape
+
+# ---------- language ----------
+UNIT_EN = {"个": "", "撮": "pinch", "片": "slices", "勺": "scoop", "根": "", "瓣": "cloves"}
+missing = []
+def T(obj, key, where):
+    """Chinese field, or its *_en twin in English mode (collects missing translations)."""
+    if not EN:
+        return obj.get(key, "")
+    if obj.get(key) and not obj.get(key + "_en"):
+        missing.append(f"{where}.{key}_en")
+    return obj.get(key + "_en", "")
+TITLE = T(r, "title", "recipe")
+SNAME = r.get("serving_name_en", "serving") if EN else r.get("serving_name", "份")
+for k, i in ING.items():
+    i["_name"], i["_note"] = T(i, "name", k), T(i, "note", k)
+    u = i.get("unit", "")
+    i["_unit"] = (i.get("unit_en", UNIT_EN.get(u, u)) if EN else u)
+for k, s in STEPS.items():
+    s["_action"] = T(s, "action", k)
+assert not missing, "missing English: " + ", ".join(missing)
+WAIT = "wait" if EN else "等待"
 
 # ---------- checks ----------
 for k, s in STEPS.items():
@@ -75,7 +99,7 @@ def leafset(k):
 def qty(i):
     q = i.get("qty", "")
     q = int(q) if isinstance(q, float) and q.is_integer() else q
-    return f"{q} {i.get('unit', '')}".strip()
+    return f"{q} {i['_unit']}".strip()
 
 def dur(s):
     m = s.get("min")
@@ -90,17 +114,17 @@ def recipe_table(cls_on=True):
             span, wid = len(leafset(k)), (col[parent[k]] - col[k]) if k in parent else 1
             if k in ING:
                 i = ING[k]
-                note = (f'<span class="n">{E(i["note"])}</span>' if cls_on else f'<br><sub>{E(i["note"])}</sub>') if i.get("note") else ""
+                note = (f'<span class="n">{E(i["_note"])}</span>' if cls_on else f'<br><sub>{E(i["_note"])}</sub>') if i["_note"] else ""
                 if cls_on:
-                    cells.append(f'<td class="i" colspan="{wid}"><span class="q">{E(qty(i))}</span>{E(i["name"])}{note}</td>')
+                    cells.append(f'<td class="i" colspan="{wid}"><span class="q">{E(qty(i))}</span>{E(i["_name"])}{note}</td>')
                 else:
-                    cells.append(f'<td colspan="{wid}">{E(i["name"])} <b>{E(qty(i))}</b>{note}</td>')
+                    cells.append(f'<td colspan="{wid}">{E(i["_name"])} <b>{E(qty(i))}</b>{note}</td>')
             else:
                 s = TREE[k]
-                d = " · ".join(x for x in [dur(s), "等待" if s.get("passive") else ""] if x)
+                d = " · ".join(x for x in [dur(s), WAIT if s.get("passive") else ""] if x)
                 d = (f'<span class="n">{E(d)}</span>' if cls_on else f'<br><sub>{E(d)}</sub>') if d else ""
                 c = f' class="s {s["phase"]} c{col[k] % 2}"' if cls_on else ""
-                cells.append(f'<td{c} rowspan="{span}" colspan="{wid}">{E(s["action"])}{d}</td>')
+                cells.append(f'<td{c} rowspan="{span}" colspan="{wid}">{E(s["_action"])}{d}</td>')
             if k not in parent or leafset(parent[k])[0] != l:
                 break
             k = parent[k]
@@ -167,9 +191,15 @@ def nutrition_html():
     return f'<table class="nt"><tr><th></th>{th}</tr>{body}</table>'
 
 def summary_line():
+    kcal, prot = (fmt(nut_total[0] / SERV, 1), fmt(nut_total[1] / SERV, 1)) if has_nut else (None, None)
+    if EN:
+        parts = [f"~{total} min", f"{SERV} {SNAME}" if SERV > 1 else f"1 {SNAME}"]
+        if has_nut:
+            parts.append(f"{kcal} kcal · {prot} g protein per {SNAME.rstrip('s')}")
+        return " · ".join(parts)
     parts = [f"约 {total} 分钟", f"{SERV} {SNAME}" if SERV > 1 else "1 份"]
     if has_nut:
-        parts.append(f"每{SNAME} {fmt(nut_total[0] / SERV, 1)} kcal · 蛋白质 {fmt(nut_total[1] / SERV, 1)} g")
+        parts.append(f"每{SNAME} {kcal} kcal · 蛋白质 {prot} g")
     return " · ".join(parts)
 
 # ---------- chat widget / page: borders only, no colour coding ----------
@@ -206,7 +236,7 @@ def timeline():
         s = STEPS[k]
         m = s.get("min") or 0
         cls = "bar wait" if s.get("passive") else "bar"
-        out.append(f'<div class="lab">{E(s["action"])}</div><div class="track">{grid}'
+        out.append(f'<div class="lab">{E(s["_action"])}</div><div class="track">{grid}'
                    f'<div class="{cls}" style="left:{pct(start[k]):.2f}%;width:{max(pct(m), 1.5):.2f}%" '
                    f'title="{start[k]}–{end[k]} min"></div></div>')
     labels = "".join(f'<span class="{"first" if t == 0 else "last" if t == total else ""}" style="left:{pct(t):.2f}%">{t}</span>' for t in ticks)
@@ -220,7 +250,7 @@ PH = {  # light fill A, light fill B (alternate columns), text, bar
     "wait": ("#EFEEE9", "#E0DED6", "#444441", "#B4B2A9"),
 }
 
-def image_html():
+def image_html(table_only=False):
     track_w, lab_w = 420, 112
     px = lambda v: round(track_w * v / total)
     grid = "".join(f'<div style="position:absolute;left:{px(t)}px;top:0;bottom:0;width:1px;background:#e3e0d6"></div>' for t in ticks[1:-1])
@@ -229,20 +259,21 @@ def image_html():
         s = STEPS[k]
         m = s.get("min") or 0
         bar = PH[s["phase"]][3]
-        tl.append(f'<tr><td class="tl">{E(s["action"])}</td><td class="tk"><div style="position:relative;height:30px;width:{track_w}px">{grid}'
+        tl.append(f'<tr><td class="tl">{E(s["_action"])}</td><td class="tk"><div style="position:relative;height:30px;width:{track_w}px">{grid}'
                   f'<div style="position:absolute;left:{px(start[k])}px;width:{max(px(m), 5)}px;top:9px;height:12px;background:{bar};border-radius:3px"></div>'
                   f'</div></td></tr>')
     axis = "".join(f'<div style="position:absolute;left:{px(t) - 15}px;width:30px;text-align:center;top:4px">{t}</div>' for t in ticks)
     tl.append(f'<tr><td class="tl axl">分钟</td><td><div style="position:relative;height:22px;width:{track_w}px;font-size:11px;color:#6b6a64">{axis}</div></td></tr>')
     step_css = "".join(f".cfe .{p}.c0{{background:{a};color:{t}}}.cfe .{p}.c1{{background:{b};color:{t}}}" for p, (a, b, t, _) in PH.items())
-    css = f"""body{{margin:0;padding:36px 40px;background:#fbfaf7;color:#1f1e1d;font-family:"Noto Sans CJK SC","Noto Sans SC",sans-serif;width:680px}}
+    css = f"""body{{margin:0;padding:36px 40px;background:#fbfaf7;color:#1f1e1d;font-family:"Noto Sans CJK SC","Noto Sans SC",sans-serif;width:960px}}
 h1{{font-size:26px;font-weight:bold;margin:0 0 6px;letter-spacing:1px}}
 .sub{{color:#6b6a64;font-size:13px;margin-bottom:6px}}
-.sec{{font-size:12px;color:#6b6a64;margin:28px 0 10px;letter-spacing:2px;border-bottom:1px solid #d9d6cc;padding-bottom:6px}}
+.sec{{font-size:12px;color:#6b6a64;margin:28px 0 10px;letter-spacing:2px;border-bottom:1px solid #d9d6cc;padding-bottom:6px;width:680px}}
 .cfe{{border-collapse:collapse;font-size:14px}}
 .cfe td{{border:1.5px solid #3d3d3a;padding:8px 12px;vertical-align:middle}}
 .cfe .i{{background:#fff;white-space:nowrap}}
-.cfe .q{{float:right;margin-left:18px;color:#5f5e5a}}
+.cfe .q{{float:right;margin-left:18px;color:#5f5e5a;white-space:nowrap}}
+.cfe .s{{max-width:150px}}
 .cfe .s{{text-align:center;font-weight:bold}}
 {step_css}
 .cfe .n{{display:block;font-size:11px;font-weight:normal;margin-top:2px}}
@@ -258,9 +289,13 @@ h1{{font-size:26px;font-weight:bold;margin:0 0 6px;letter-spacing:1px}}
 .nt .v{{text-align:right}}
 .nt .u{{color:#888780;font-size:11px;margin-left:4px}}
 """
+    head = f"<h1>{E(TITLE)}</h1><div class=\"sub\">{E(summary_line())}</div>"
+    if table_only:
+        return (f'<!doctype html><html><head><meta charset="utf-8"><style>{css}</style></head><body>'
+                f'{head}<div style="height:16px"></div>{recipe_table()}</body></html>')
     nut = f'<div class="sec">营养成分</div>{nutrition_html()}' if has_nut else ""
     return (f'<!doctype html><html><head><meta charset="utf-8"><style>{css}</style></head><body>'
-            f"<h1>{E(r['title'])}</h1><div class=\"sub\">{E(summary_line())}</div>"
+            f"{head}"
             f'<div class="sec">配方</div>{recipe_table()}'
             f'<div class="sec">时间线</div><table class="tlt">{"".join(tl)}</table>'
             f'{nut}</body></html>')
@@ -268,7 +303,7 @@ h1{{font-size:26px;font-weight:bold;margin:0 0 6px;letter-spacing:1px}}
 # ---------- outputs ----------
 if mode == "widget":
     vars_ = ":root{--line:var(--border-stronger);--line2:var(--border);--t2:var(--text-secondary);--t3:var(--text-muted);--fg2:var(--text-primary)}"
-    summary = f'{E(r["title"])}：{len(ING)} 种材料，{len(TREE)} 个步骤，约 {total} 分钟'
+    summary = f'{E(TITLE)}：{len(ING)} 种材料，{len(TREE)} 个步骤，约 {total} 分钟'
     doc = (f"<style>{vars_}{CSS}</style><h2 class=\"sr-only\">{summary}</h2>"
            f'<div class="sum">{E(summary_line())}</div>'
            f'<div class="wrap">{recipe_table()}</div>{timeline()}{nutrition_html()}')
@@ -276,14 +311,14 @@ elif mode == "page":
     vars_ = (":root{--bg:#fff;--fg:#222;--line:#555;--line2:#ddd;--t2:#666;--t3:#bbb;--fg2:#444}"
              "@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#1b1b1d;--fg:#eee;--line:#aaa;--line2:#3a3a3d;--t2:#aaa;--t3:#666;--fg2:#ddd}}")
     doc = (f'<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-           f"<title>{E(r['title'])}</title><style>{vars_}body{{background:var(--bg);color:var(--fg);"
+           f"<title>{E(TITLE)}</title><style>{vars_}body{{background:var(--bg);color:var(--fg);"
            f'font-family:-apple-system,"PingFang SC",sans-serif;margin:0;padding:16px}}{CSS}</style></head><body>'
-           f"<h1 style=\"font-size:20px;margin:0 0 4px\">{E(r['title'])}</h1><div class=\"sum\">{E(summary_line())}</div>"
+           f"<h1 style=\"font-size:20px;margin:0 0 4px\">{E(TITLE)}</h1><div class=\"sum\">{E(summary_line())}</div>"
            f"<div class=\"wrap\">{recipe_table()}</div>{timeline()}{nutrition_html()}</body></html>")
-elif mode == "png":
+elif mode in ("png", "table-png"):
     with tempfile.NamedTemporaryFile("w", suffix=".html", delete=False, encoding="utf-8") as f:
-        f.write(image_html())
-    subprocess.run(["wkhtmltoimage", "--quiet", "--enable-local-file-access", "--zoom", "2", "--width", "1520",
+        f.write(image_html(table_only=mode == "table-png"))
+    subprocess.run(["wkhtmltoimage", "--quiet", "--enable-local-file-access", "--zoom", "2", "--width", "2080",
                     "--format", "png", f.name, out], check=True, stderr=subprocess.DEVNULL)
     os.unlink(f.name)
     try:  # trim unused canvas on the right/bottom, keep a margin
@@ -301,9 +336,9 @@ else:
     g = [FENCE + "mermaid", "gantt", "dateFormat mm", "axisFormat %M", "todayMarker off"]
     for k in order:
         s = STEPS[k]
-        g.append(f"  {s['action']} :{'done, ' if s.get('passive') else ''}{k}, {start[k]:02d}, {s.get('min') or 0}m")
+        g.append(f"  {s['_action']} :{'done, ' if s.get('passive') else ''}{k}, {start[k]:02d}, {s.get('min') or 0}m")
     g.append(FENCE)
-    doc = (f"# {r['title']}\n\n{summary_line()}\n\n## 配方表\n\n{recipe_table(cls_on=False)}\n\n"
+    doc = (f"# {TITLE}\n\n{summary_line()}\n\n## 配方表\n\n{recipe_table(cls_on=False)}\n\n"
            f"## 时间线\n\n" + "\n".join(g) + "\n")
     if has_nut:
         head, rows = nutrition_rows()
