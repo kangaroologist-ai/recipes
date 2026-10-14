@@ -29,13 +29,14 @@ egg: {name: 鸡蛋, qty: 1, unit: 个, note: 室温, nut: [78, 6, 1, 5, 0, 62], 
 ```yaml
 wet:  {action: 打散, in: [egg, milk], min: 1}
 rest: {action: 静置, in: [mix], min: 7, passive: true}
-heat: {phase: heat, action: 热锅抹黄油, in: [butter], min: 3, passive: true, end_with: rest}
-fry:  {phase: heat, action: 煎, in: [rest, heat], min: 2}
+heat: {phase: heat, action: 热锅, note: 小火 · 抹黄油, in: [butter], min: 3, passive: true, end_with: rest}
+fry:  {phase: heat, action: 煎, note: 小火 · 加盖, in: [rest, heat], min: 2}
 ```
 
 | 字段 | 说明 |
 |---|---|
-| `action` | 动作，2–6 个字，细节放进回复正文 |
+| `action` | 只写一个动词（拌匀、静置、煎、翻面 / Whisk, Rest, Cook, Flip）。做的是什么从左边的材料就看得出来，不用重复 |
+| `note` | 可选，动词下面的小字，放火候、程度这类关键提示，用 `·` 分隔，每段一行，比如 `小火 · 加盖`、`无干粉即停` |
 | `in` | 用到的材料 id 或前面步骤的 id，决定配方表的合并格 |
 | `min` | 时长（分钟） |
 | `passive` | `true` 表示不用一直动手（静置、浸泡、热锅、烤箱里烤），可以和别的步骤同时进行，格子里标“等待” |
@@ -74,9 +75,9 @@ fry:  {phase: heat, action: 煎, in: [rest, heat], min: 2}
 |---|---|
 | 顶层 | `title_en`；有 `serving_name` 时加 `serving_name_en`（复数，如 `slices`），没有时默认 `serving` |
 | 材料 | `name_en`；有 `note` 时加 `note_en`；单位不是 g/ml/tsp 这类通用单位时可加 `unit_en`（个 → 空，撮 → pinch，片 → slices 已内置） |
-| 步骤 | `action_en`，含逗号时要加引号，比如 `action_en: "Flip, cook"` |
+| 步骤 | `action_en`；有 `note` 时加 `note_en`，含 `·` 或逗号时加引号，比如 `note_en: "low · covered"` |
 
-英文名同样不写品牌，动作尽量简短（几个词），格子太窄时会换行。
+英文名同样不写品牌，用英文菜谱里的常用叫法（比如 0 脂希腊酸奶是 Nonfat Greek yogurt）。动作用一个常见的烹饪动词：Whisk、Stir、Rest、Soak、Preheat、Cook / Fry、Flip。注意词义：fold 是把打发的东西轻轻翻进去，普通拌匀不要用。
 
 ## 营养计算
 

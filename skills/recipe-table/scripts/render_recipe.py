@@ -42,7 +42,7 @@ for k, i in ING.items():
     u = i.get("unit", "")
     i["_unit"] = (i.get("unit_en", UNIT_EN.get(u, u)) if EN else u)
 for k, s in STEPS.items():
-    s["_action"] = T(s, "action", k)
+    s["_action"], s["_note"] = T(s, "action", k), T(s, "note", k)
 assert not missing, "missing English: " + ", ".join(missing)
 WAIT = "wait" if EN else "等待"
 
@@ -105,22 +105,56 @@ def dur(s):
     m = s.get("min")
     return "" if m is None else f"{m} min"
 
-def col_widths(ing, base, per, lo, hi):
-    """Pixel width per table column: ingredient column fixed, step columns grow with the longest
-    step in that column, so a 7-minute rest looks longer than a 1-minute stir (clamped both ways)."""
-    w = [ing]
-    for c in range(1, LAST + 1):
-        m = max((STEPS[k].get("min") or 0 for k in TREE if col[k] == c), default=0)
-        w.append(max(lo, min(hi, base + per * m)))
-    return w
+def textw(s, px):
+    """Rough rendered width of a string: CJK glyphs are square, Latin about 0.56 em."""
+    return sum(px if ord(ch) > 0x2E80 else px * 0.56 for ch in str(s))
 
-def recipe_table(cls_on=True, widths=None):
-    """Ingredient cell: name first, quantity right-aligned. Step cell class = phase + column parity."""
+def layout(scale, ing_px, font):
+    """Physical table columns and each cell's left edge.
+
+    Column 0 holds ingredients, sized to the longest name + quantity so names don't wrap.
+    Every step column gets width scale(minutes) of its longest step. When a column holds a
+    shorter step too (heat the pan 3 min under rest 7 min), the column is split into right-
+    aligned sub-columns so the shorter step is drawn narrower and its input cell stretches
+    to meet it, like a timeline.
+    """
+    lo_ing, hi_ing = ing_px
+    single = [k for k in ING if col[parent[k]] == 1] or list(ING)
+    need = max(textw(ING[k]["_name"], font) + textw(qty(ING[k]), font) for k in single) + 40
+    widths, starts, groups = [max(lo_ing, min(hi_ing, round(need)))], {0: 0}, {}
+    for c in range(1, LAST + 1):
+        cum, idx = [], {}
+        for d in sorted({STEPS[k].get("min") or 0 for k in TREE if col[k] == c}):
+            w = scale(d)
+            if cum and w - cum[-1] < 24:   # too close to be worth a separate sliver
+                cum[-1] = max(cum[-1], w)
+            else:
+                cum.append(w)
+            idx[d] = len(cum) - 1
+        starts[c], groups[c] = len(widths), (len(cum), idx)
+        widths += [cum[i] - cum[i - 1] for i in range(len(cum) - 1, 0, -1)] + [cum[0]]
+    left = {}
+    for k in depth:
+        if k in ING or not TREE[k]["in"]:
+            left[k] = 0
+        else:
+            n, idx = groups[col[k]]
+            left[k] = starts[col[k]] + (n - 1 - idx[STEPS[k].get("min") or 0])
+    return widths, left
+
+IMG_SCALE = lambda d: max(96, min(200, 44 + 22 * d))
+WIDGET_SCALE = lambda d: max(56, min(140, 28 + 14 * d))
+
+def recipe_table(cls_on=True, scale=IMG_SCALE, ing_px=(150, 300), font=14, fixed=True):
+    """Ingredient cell: name first, quantity right-aligned. Step cell: verb, then small note and time."""
+    widths, left = layout(scale, ing_px, font)
+    total_cols = len(widths)
     rows = []
     for l in leaves:
         cells, k = [], l
         while True:
-            span, wid = len(leafset(k)), (col[parent[k]] - col[k]) if k in parent else 1
+            span = len(leafset(k))
+            wid = (left[parent[k]] if k in parent else total_cols) - left[k]
             if k in ING:
                 i = ING[k]
                 note = (f'<span class="n">{E(i["_note"])}</span>' if cls_on else f'<br><sub>{E(i["_note"])}</sub>') if i["_note"] else ""
@@ -130,19 +164,18 @@ def recipe_table(cls_on=True, widths=None):
                     cells.append(f'<td colspan="{wid}">{E(i["_name"])} <b>{E(qty(i))}</b>{note}</td>')
             else:
                 s = TREE[k]
-                d = " · ".join(x for x in [dur(s), WAIT if s.get("passive") else ""] if x)
-                d = (f'<span class="n">{E(d)}</span>' if cls_on else f'<br><sub>{E(d)}</sub>') if d else ""
+                notes = [x.strip() for x in s["_note"].split("·") if x.strip()]  # one short note per line
+                small = notes + [x for x in [" · ".join(x for x in [dur(s), WAIT if s.get("passive") else ""] if x)] if x]
+                d = "".join((f'<span class="n">{E(x)}</span>' if cls_on else f'<br><sub>{E(x)}</sub>') for x in small)
                 c = f' class="s {s["phase"]} c{col[k] % 2}"' if cls_on else ""
                 cells.append(f'<td{c} rowspan="{span}" colspan="{wid}">{E(s["_action"])}{d}</td>')
             if k not in parent or leafset(parent[k])[0] != l:
                 break
             k = parent[k]
         rows.append("<tr>" + "".join(cells) + "</tr>")
-    if not widths:
-        return '<table class="cfe">' + "".join(rows) + "</table>"
     cols = "".join(f'<col style="width:{w}px">' for w in widths)
-    return (f'<table class="cfe" style="table-layout:fixed;width:{sum(widths)}px"><colgroup>{cols}</colgroup>'
-            + "".join(rows) + "</table>")
+    style = f' style="table-layout:fixed;width:{sum(widths)}px"' if fixed else ""
+    return f'<table class="cfe"{style}><colgroup>{cols}</colgroup>' + "".join(rows) + "</table>"
 
 # ---------- schedule ----------
 # One cook: hands-on steps never overlap, in the order they are listed. Passive steps (resting,
@@ -279,10 +312,12 @@ def image_html(table_only=False):
     axis = "".join(f'<div style="position:absolute;left:{px(t) - 15}px;width:30px;text-align:center;top:4px">{t}</div>' for t in ticks)
     tl.append(f'<tr><td class="tl axl">{"min" if EN else "分钟"}</td><td><div style="position:relative;height:22px;width:{track_w}px;font-size:11px;color:{MUTED}">{axis}</div></td></tr>')
     step_css = "".join(f".cfe .{p}.c0{{background:{a};color:{t}}}.cfe .{p}.c1{{background:{b};color:{t}}}" for p, (a, b, t, _) in PH.items())
-    css = f"""body{{margin:0;padding:36px;background:#E8ECF1;color:{INK};font-family:"Noto Sans CJK SC","Noto Sans SC",sans-serif;width:1100px}}
-.card{{display:inline-block;background:#fff;border:1px solid #C9D0DA;border-radius:14px;padding:30px 34px 34px;-webkit-box-shadow:0 2px 12px rgba(29,36,48,.08)}}
+    css = f"""body{{margin:0;padding:40px;background:#E6EAF0;color:{INK};font-family:"Noto Sans CJK SC","Noto Sans SC",sans-serif;width:1200px}}
+.card{{display:inline-block;background:#FDFDFC;border:1px solid #8E99A8;border-radius:6px;padding:7px;-webkit-box-shadow:0 3px 14px rgba(29,36,48,.10)}}
+.frame{{border:1px solid #CBD2DC;border-radius:3px;padding:26px 30px 30px}}
+.bar{{width:34px;height:3px;background:#3F5878;margin:0 0 14px}}
 h1{{font-size:24px;font-weight:bold;margin:0 0 6px;letter-spacing:.5px}}
-.sub{{color:{MUTED};font-size:13px;padding-bottom:18px;margin-bottom:20px;border-bottom:1px solid {HAIR}}}
+.sub{{color:{MUTED};font-size:13px;margin-bottom:20px}}
 .sec{{font-size:12px;color:{MUTED};margin:28px 0 10px;letter-spacing:2px}}
 .cfe{{border-collapse:collapse;font-size:14px;line-height:1.4}}
 .cfe td{{border:1px solid {LINE};padding:9px 12px;vertical-align:middle}}
@@ -290,7 +325,7 @@ h1{{font-size:24px;font-weight:bold;margin:0 0 6px;letter-spacing:.5px}}
 .cfe .q{{float:right;margin-left:12px;color:{MUTED};white-space:nowrap}}
 .cfe .s{{text-align:center;font-weight:bold}}
 {step_css}
-.cfe .n{{display:block;font-size:11px;font-weight:normal;margin-top:3px;opacity:.8}}
+.cfe .n{{display:block;font-size:11px;font-weight:normal;margin-top:2px;opacity:.8;white-space:nowrap}}
 .cfe .i .n{{color:{MUTED};opacity:1}}
 .tlt{{border-collapse:collapse;font-size:13px}}
 .tlt td{{padding:0}}
@@ -303,15 +338,15 @@ h1{{font-size:24px;font-weight:bold;margin:0 0 6px;letter-spacing:.5px}}
 .nt .v{{text-align:right}}
 .nt .u{{color:{MUTED};font-size:11px;margin-left:4px}}
 """
-    table = recipe_table(widths=col_widths(190, 40, 18, 104, 176))
-    head = f"<h1>{E(TITLE)}</h1><div class=\"sub\">{E(summary_line())}</div>"
+    table = recipe_table()
+    head = f"<div class=\"bar\"></div><h1>{E(TITLE)}</h1><div class=\"sub\">{E(summary_line())}</div>"
     if table_only:
         body = f"{head}{table}"
     else:
         nut = f'<div class="sec">营养成分</div>{nutrition_html()}' if has_nut else ""
         body = (f"{head}{table}"
                 f'<div class="sec">时间线</div><table class="tlt">{"".join(tl)}</table>{nut}')
-    return f'<!doctype html><html><head><meta charset="utf-8"><style>{css}</style></head><body><div class="card">{body}</div></body></html>'
+    return f'<!doctype html><html><head><meta charset="utf-8"><style>{css}</style></head><body><div class="card"><div class="frame">{body}</div></div></body></html>'
 
 # ---------- outputs ----------
 if mode == "widget":
@@ -319,7 +354,7 @@ if mode == "widget":
     summary = f'{E(TITLE)}：{len(ING)} 种材料，{len(TREE)} 个步骤，约 {total} 分钟'
     doc = (f"<style>{vars_}{CSS}</style><h2 class=\"sr-only\">{summary}</h2>"
            f'<div class="sum">{E(summary_line())}</div>'
-           f'<div class="wrap">{recipe_table(widths=col_widths(124, 30, 12, 58, 132))}</div>{timeline()}{nutrition_html()}')
+           f'<div class="wrap">{recipe_table(scale=WIDGET_SCALE, ing_px=(110, 220), font=13)}</div>{timeline()}{nutrition_html()}')
 elif mode == "page":
     vars_ = (":root{--bg:#fff;--fg:#222;--line:#555;--line2:#ddd;--t2:#666;--t3:#bbb;--fg2:#444}"
              "@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#1b1b1d;--fg:#eee;--line:#aaa;--line2:#3a3a3d;--t2:#aaa;--t3:#666;--fg2:#ddd}}")
@@ -327,11 +362,11 @@ elif mode == "page":
            f"<title>{E(TITLE)}</title><style>{vars_}body{{background:var(--bg);color:var(--fg);"
            f'font-family:-apple-system,"PingFang SC",sans-serif;margin:0;padding:16px}}{CSS}</style></head><body>'
            f"<h1 style=\"font-size:20px;margin:0 0 4px\">{E(TITLE)}</h1><div class=\"sum\">{E(summary_line())}</div>"
-           f"<div class=\"wrap\">{recipe_table()}</div>{timeline()}{nutrition_html()}</body></html>")
+           f"<div class=\"wrap\">{recipe_table(scale=WIDGET_SCALE, ing_px=(110, 220), font=13)}</div>{timeline()}{nutrition_html()}</body></html>")
 elif mode in ("png", "table-png"):
     with tempfile.NamedTemporaryFile("w", suffix=".html", delete=False, encoding="utf-8") as f:
         f.write(image_html(table_only=mode == "table-png"))
-    subprocess.run(["wkhtmltoimage", "--quiet", "--enable-local-file-access", "--zoom", "2", "--width", "2344",
+    subprocess.run(["wkhtmltoimage", "--quiet", "--enable-local-file-access", "--zoom", "2", "--width", "2560",
                     "--format", "png", f.name, out], check=True, stderr=subprocess.DEVNULL)
     os.unlink(f.name)
     try:  # trim unused canvas on the right/bottom, keep a margin
@@ -351,7 +386,7 @@ else:
         s = STEPS[k]
         g.append(f"  {s['_action']} :{'done, ' if s.get('passive') else ''}{k}, {start[k]:02d}, {s.get('min') or 0}m")
     g.append(FENCE)
-    doc = (f"# {TITLE}\n\n{summary_line()}\n\n## 配方表\n\n{recipe_table(cls_on=False)}\n\n"
+    doc = (f"# {TITLE}\n\n{summary_line()}\n\n## 配方表\n\n{recipe_table(cls_on=False, fixed=False)}\n\n"
            f"## 时间线\n\n" + "\n".join(g) + "\n")
     if has_nut:
         head, rows = nutrition_rows()
