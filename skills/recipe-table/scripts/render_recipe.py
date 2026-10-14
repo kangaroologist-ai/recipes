@@ -105,7 +105,16 @@ def dur(s):
     m = s.get("min")
     return "" if m is None else f"{m} min"
 
-def recipe_table(cls_on=True):
+def col_widths(ing, base, per, lo, hi):
+    """Pixel width per table column: ingredient column fixed, step columns grow with the longest
+    step in that column, so a 7-minute rest looks longer than a 1-minute stir (clamped both ways)."""
+    w = [ing]
+    for c in range(1, LAST + 1):
+        m = max((STEPS[k].get("min") or 0 for k in TREE if col[k] == c), default=0)
+        w.append(max(lo, min(hi, base + per * m)))
+    return w
+
+def recipe_table(cls_on=True, widths=None):
     """Ingredient cell: name first, quantity right-aligned. Step cell class = phase + column parity."""
     rows = []
     for l in leaves:
@@ -129,7 +138,11 @@ def recipe_table(cls_on=True):
                 break
             k = parent[k]
         rows.append("<tr>" + "".join(cells) + "</tr>")
-    return '<table class="cfe">' + "".join(rows) + "</table>"
+    if not widths:
+        return '<table class="cfe">' + "".join(rows) + "</table>"
+    cols = "".join(f'<col style="width:{w}px">' for w in widths)
+    return (f'<table class="cfe" style="table-layout:fixed;width:{sum(widths)}px"><colgroup>{cols}</colgroup>'
+            + "".join(rows) + "</table>")
 
 # ---------- schedule ----------
 # One cook: hands-on steps never overlap, in the order they are listed. Passive steps (resting,
@@ -205,7 +218,7 @@ def summary_line():
 # ---------- chat widget / page: borders only, no colour coding ----------
 CSS = """.cfe{border-collapse:collapse;font-size:13px;line-height:1.35}
 .cfe td{border:1px solid var(--line);padding:6px 10px;vertical-align:middle}
-.cfe .i{white-space:nowrap}
+.cfe .i{word-break:break-word}
 .cfe .q{float:right;margin-left:14px;color:var(--t2);font-variant-numeric:tabular-nums}
 .cfe .s{text-align:center;min-width:56px}
 .cfe .n{display:block;font-size:11px;color:var(--t2)}
@@ -243,62 +256,62 @@ def timeline():
     out.append(f'<div class="axl">分钟</div><div class="ax">{labels}</div>')
     return '<div class="gt">' + "".join(out) + "</div>"
 
-# ---------- image: phase colours (alternating shade per column), dark borders on every cell ----------
-PH = {  # light fill A, light fill B (alternate columns), text, bar
-    "prep": ("#FAEEDA", "#F4DDB2", "#633806", "#EF9F27"),
-    "heat": ("#FAECE7", "#F3CFC2", "#712B13", "#D85A30"),
-    "wait": ("#EFEEE9", "#E0DED6", "#444441", "#B4B2A9"),
+# ---------- image: a calm card; phase colours (alternating shade per column), dark borders on every cell ----------
+PH = {  # fill A, fill B (alternate columns), text, timeline bar
+    "prep": ("#E4EFEE", "#D2E5E2", "#173F3B", "#4E9089"),
+    "heat": ("#E5EAF4", "#D3DCEE", "#1F2F55", "#5468A0"),
+    "wait": ("#F1F2F4", "#E3E6EA", "#3A404B", "#A8AFBA"),
 }
+INK, MUTED, LINE, HAIR = "#1D2430", "#6A7383", "#4A5361", "#E2E6EC"
 
 def image_html(table_only=False):
-    track_w, lab_w = 420, 112
+    track_w, lab_w = 420, 120
     px = lambda v: round(track_w * v / total)
-    grid = "".join(f'<div style="position:absolute;left:{px(t)}px;top:0;bottom:0;width:1px;background:#e3e0d6"></div>' for t in ticks[1:-1])
+    grid = "".join(f'<div style="position:absolute;left:{px(t)}px;top:0;bottom:0;width:1px;background:{HAIR}"></div>' for t in ticks[1:-1])
     tl = []
     for k in order:
         s = STEPS[k]
         m = s.get("min") or 0
         bar = PH[s["phase"]][3]
         tl.append(f'<tr><td class="tl">{E(s["_action"])}</td><td class="tk"><div style="position:relative;height:30px;width:{track_w}px">{grid}'
-                  f'<div style="position:absolute;left:{px(start[k])}px;width:{max(px(m), 5)}px;top:9px;height:12px;background:{bar};border-radius:3px"></div>'
+                  f'<div style="position:absolute;left:{px(start[k])}px;width:{max(px(m), 5)}px;top:10px;height:10px;background:{bar};border-radius:2px"></div>'
                   f'</div></td></tr>')
     axis = "".join(f'<div style="position:absolute;left:{px(t) - 15}px;width:30px;text-align:center;top:4px">{t}</div>' for t in ticks)
-    tl.append(f'<tr><td class="tl axl">分钟</td><td><div style="position:relative;height:22px;width:{track_w}px;font-size:11px;color:#6b6a64">{axis}</div></td></tr>')
+    tl.append(f'<tr><td class="tl axl">{"min" if EN else "分钟"}</td><td><div style="position:relative;height:22px;width:{track_w}px;font-size:11px;color:{MUTED}">{axis}</div></td></tr>')
     step_css = "".join(f".cfe .{p}.c0{{background:{a};color:{t}}}.cfe .{p}.c1{{background:{b};color:{t}}}" for p, (a, b, t, _) in PH.items())
-    css = f"""body{{margin:0;padding:36px 40px;background:#fbfaf7;color:#1f1e1d;font-family:"Noto Sans CJK SC","Noto Sans SC",sans-serif;width:960px}}
-h1{{font-size:26px;font-weight:bold;margin:0 0 6px;letter-spacing:1px}}
-.sub{{color:#6b6a64;font-size:13px;margin-bottom:6px}}
-.sec{{font-size:12px;color:#6b6a64;margin:28px 0 10px;letter-spacing:2px;border-bottom:1px solid #d9d6cc;padding-bottom:6px;width:680px}}
-.cfe{{border-collapse:collapse;font-size:14px}}
-.cfe td{{border:1.5px solid #3d3d3a;padding:8px 12px;vertical-align:middle}}
-.cfe .i{{background:#fff;white-space:nowrap}}
-.cfe .q{{float:right;margin-left:18px;color:#5f5e5a;white-space:nowrap}}
-.cfe .s{{max-width:150px}}
+    css = f"""body{{margin:0;padding:36px;background:#E8ECF1;color:{INK};font-family:"Noto Sans CJK SC","Noto Sans SC",sans-serif;width:1100px}}
+.card{{display:inline-block;background:#fff;border:1px solid #C9D0DA;border-radius:14px;padding:30px 34px 34px;-webkit-box-shadow:0 2px 12px rgba(29,36,48,.08)}}
+h1{{font-size:24px;font-weight:bold;margin:0 0 6px;letter-spacing:.5px}}
+.sub{{color:{MUTED};font-size:13px;padding-bottom:18px;margin-bottom:20px;border-bottom:1px solid {HAIR}}}
+.sec{{font-size:12px;color:{MUTED};margin:28px 0 10px;letter-spacing:2px}}
+.cfe{{border-collapse:collapse;font-size:14px;line-height:1.4}}
+.cfe td{{border:1px solid {LINE};padding:9px 12px;vertical-align:middle}}
+.cfe .i{{background:#fff;word-wrap:break-word}}
+.cfe .q{{float:right;margin-left:12px;color:{MUTED};white-space:nowrap}}
 .cfe .s{{text-align:center;font-weight:bold}}
 {step_css}
-.cfe .n{{display:block;font-size:11px;font-weight:normal;margin-top:2px}}
-.cfe .i .n{{color:#888780}}
+.cfe .n{{display:block;font-size:11px;font-weight:normal;margin-top:3px;opacity:.8}}
+.cfe .i .n{{color:{MUTED};opacity:1}}
 .tlt{{border-collapse:collapse;font-size:13px}}
 .tlt td{{padding:0}}
-.tlt .tk{{border-bottom:1px solid #e3e0d6}}
-.tl{{width:{lab_w}px;padding-right:12px !important;white-space:nowrap;border-bottom:1px solid #e3e0d6}}
-.axl{{border-bottom:none !important;font-size:11px;color:#6b6a64}}
+.tlt .tk{{border-bottom:1px solid {HAIR}}}
+.tl{{width:{lab_w}px;padding-right:12px !important;white-space:nowrap;border-bottom:1px solid {HAIR};color:{INK}}}
+.axl{{border-bottom:none !important;font-size:11px;color:{MUTED} !important}}
 .nt{{border-collapse:collapse;font-size:14px}}
-.nt th,.nt td{{border:1.5px solid #3d3d3a;padding:7px 16px;text-align:left}}
-.nt th{{background:#F1EFE8;font-weight:bold}}
+.nt th,.nt td{{border:1px solid {LINE};padding:7px 16px;text-align:left}}
+.nt th{{background:#EEF1F5;font-weight:bold}}
 .nt .v{{text-align:right}}
-.nt .u{{color:#888780;font-size:11px;margin-left:4px}}
+.nt .u{{color:{MUTED};font-size:11px;margin-left:4px}}
 """
+    table = recipe_table(widths=col_widths(190, 40, 18, 104, 176))
     head = f"<h1>{E(TITLE)}</h1><div class=\"sub\">{E(summary_line())}</div>"
     if table_only:
-        return (f'<!doctype html><html><head><meta charset="utf-8"><style>{css}</style></head><body>'
-                f'{head}<div style="height:16px"></div>{recipe_table()}</body></html>')
-    nut = f'<div class="sec">营养成分</div>{nutrition_html()}' if has_nut else ""
-    return (f'<!doctype html><html><head><meta charset="utf-8"><style>{css}</style></head><body>'
-            f"{head}"
-            f'<div class="sec">配方</div>{recipe_table()}'
-            f'<div class="sec">时间线</div><table class="tlt">{"".join(tl)}</table>'
-            f'{nut}</body></html>')
+        body = f"{head}{table}"
+    else:
+        nut = f'<div class="sec">营养成分</div>{nutrition_html()}' if has_nut else ""
+        body = (f"{head}{table}"
+                f'<div class="sec">时间线</div><table class="tlt">{"".join(tl)}</table>{nut}')
+    return f'<!doctype html><html><head><meta charset="utf-8"><style>{css}</style></head><body><div class="card">{body}</div></body></html>'
 
 # ---------- outputs ----------
 if mode == "widget":
@@ -306,7 +319,7 @@ if mode == "widget":
     summary = f'{E(TITLE)}：{len(ING)} 种材料，{len(TREE)} 个步骤，约 {total} 分钟'
     doc = (f"<style>{vars_}{CSS}</style><h2 class=\"sr-only\">{summary}</h2>"
            f'<div class="sum">{E(summary_line())}</div>'
-           f'<div class="wrap">{recipe_table()}</div>{timeline()}{nutrition_html()}')
+           f'<div class="wrap">{recipe_table(widths=col_widths(124, 30, 12, 58, 132))}</div>{timeline()}{nutrition_html()}')
 elif mode == "page":
     vars_ = (":root{--bg:#fff;--fg:#222;--line:#555;--line2:#ddd;--t2:#666;--t3:#bbb;--fg2:#444}"
              "@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#1b1b1d;--fg:#eee;--line:#aaa;--line2:#3a3a3d;--t2:#aaa;--t3:#666;--fg2:#ddd}}")
@@ -318,7 +331,7 @@ elif mode == "page":
 elif mode in ("png", "table-png"):
     with tempfile.NamedTemporaryFile("w", suffix=".html", delete=False, encoding="utf-8") as f:
         f.write(image_html(table_only=mode == "table-png"))
-    subprocess.run(["wkhtmltoimage", "--quiet", "--enable-local-file-access", "--zoom", "2", "--width", "2080",
+    subprocess.run(["wkhtmltoimage", "--quiet", "--enable-local-file-access", "--zoom", "2", "--width", "2344",
                     "--format", "png", f.name, out], check=True, stderr=subprocess.DEVNULL)
     os.unlink(f.name)
     try:  # trim unused canvas on the right/bottom, keep a margin
@@ -327,7 +340,7 @@ elif mode in ("png", "table-png"):
         bg = Image.new("RGB", im.size, im.getpixel((0, 0)))
         box = ImageChops.difference(im, bg).getbbox()
         if box:
-            im.crop((0, 0, min(im.width, box[2] + 80), min(im.height, box[3] + 72))).save(out)
+            im.crop((0, 0, min(im.width, box[2] + box[0]), min(im.height, box[3] + box[1]))).save(out)  # same margin all round
     except ImportError:
         pass
     doc = None

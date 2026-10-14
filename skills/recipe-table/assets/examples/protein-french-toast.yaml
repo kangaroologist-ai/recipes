@@ -13,7 +13,7 @@ ingredients:
   butter: {name: 含盐黄油, name_en: Salted butter, qty: 10, unit: g, nut: [72, 0.1, 0, 8.1, 0, 64], src: "USDA#01001"}
 steps:
   wet:   {action: 搅匀蛋液, action_en: Whisk custard, in: [yog, milk, egg, allu], min: 2}
-  soak:  {action: 面包两面浸透, action_en: Soak both sides, in: [wet, bread], min: 2, passive: true}
+  soak:  {action: 面包浸透, action_en: Soak both sides, in: [wet, bread], min: 2, passive: true}
   heat:  {phase: heat, action: 热锅化黄油, action_en: "Heat pan, melt butter", in: [butter], min: 2, passive: true, end_with: soak}
   fry:   {phase: heat, action: 煎第一面, action_en: Fry first side, in: [soak, heat], min: 3}
   flip:  {phase: heat, action: 翻面再煎, action_en: "Flip, fry", in: [fry], min: 3}
