@@ -196,8 +196,10 @@ order = sorted(STEPS, key=lambda k: (start[k], col.get(k, 0)))
 def ing_cell(i, cls_on, attrs):
     note = (f'<span class="n">{E(i["_note"])}</span>' if cls_on else f'<br><sub>{E(i["_note"])}</sub>') if i["_note"] else ""
     if cls_on:
-        q = f'<span class="q">{E(qty(i))}</span>' if qty(i) else ""
-        return f'<td class="i"{attrs}>{q}{E(i["_name"])}{note}</td>'
+        # name and quantity side by side in a borderless inner table, so the quantity stays vertically
+        # centred against the name and its note (a float would stick to the first line)
+        q = f'<td class="q">{E(qty(i))}</td>' if qty(i) else ""
+        return f'<td class="i"{attrs}><table class="iq"><tr><td>{E(i["_name"])}{note}</td>{q}</tr></table></td>'
     q = f' <b>{E(qty(i))}</b>' if qty(i) else ""
     return f'<td{attrs}>{E(i["_name"])}{q}{note}</td>'
 
@@ -209,7 +211,7 @@ def step_cell(k, s, cls_on, attrs):
     return f'<td{c}{attrs}>{E(s["_action"])}{d}</td>'
 
 def qty(i):
-    q = i.get("qty", "")
+    q = i.get("qty_en", i.get("qty", "")) if EN else i.get("qty", "")  # qty_en for words like 适量 / to taste
     q = int(q) if isinstance(q, float) and q.is_integer() else q
     return f"{q} {i['_unit']}".strip()
 
@@ -332,7 +334,9 @@ def summary_line():
 CSS = """.cfe{border-collapse:collapse;font-size:13px;line-height:1.35}
 .cfe td{border:1px solid var(--line);padding:6px 10px;vertical-align:middle}
 .cfe .i{word-break:break-word}
-.cfe .q{float:right;margin-left:14px;color:var(--t2);font-variant-numeric:tabular-nums}
+.cfe .iq{width:100%;border-collapse:collapse}
+.cfe .iq td{border:0;padding:0;vertical-align:middle}
+.cfe .iq .q{text-align:right;white-space:nowrap;padding-left:14px;color:var(--t2);font-variant-numeric:tabular-nums}
 .cfe .s{text-align:center;min-width:56px}
 .cfe .n{display:block;font-size:11px;color:var(--t2)}
 .sum{font-size:13px;color:var(--t2);margin:0 0 10px}
@@ -402,7 +406,9 @@ h1{{font-size:24px;font-weight:bold;margin:0 0 6px;letter-spacing:.5px}}
 .cfe{{border-collapse:collapse;font-size:14px;line-height:1.4}}
 .cfe td{{border:1px solid {LINE};padding:9px 12px;vertical-align:middle}}
 .cfe .i{{background:#fff;word-wrap:break-word}}
-.cfe .q{{float:right;margin-left:12px;color:{MUTED};white-space:nowrap}}
+.cfe .iq{{width:100%;border-collapse:collapse}}
+.cfe .iq td{{border:0;padding:0;vertical-align:middle;background:transparent}}
+.cfe .iq .q{{text-align:right;padding-left:12px;color:{MUTED};white-space:nowrap}}
 .cfe .s{{text-align:center;font-weight:bold}}
 {step_css}
 .cfe .n{{display:block;font-size:11px;font-weight:normal;margin-top:2px;opacity:.8;white-space:nowrap}}
