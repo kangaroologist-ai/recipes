@@ -19,6 +19,9 @@ RECIPES = ROOT / "recipes"
 README = ROOT / "README.md"
 SKILL_DIR = ROOT / "skills/recipe-table"
 DIST = ROOT / "dist"
+# recipes copied into the package as the skill's assets/examples/ (kept only once, under recipes/)
+EXAMPLES = ["recipes/breakfast/protein-pancake.yaml", "recipes/breakfast/protein-french-toast.yaml"]
+FIXED_TIME = (2020, 1, 1, 0, 0, 0)  # constant zip timestamps, so an unchanged skill packages byte-for-byte the same
 
 
 def render(src: Path, fmt: str, suffix: str = "", *extra: str) -> None:
@@ -60,10 +63,15 @@ def update_readme():
 def package_skill():
     DIST.mkdir(exist_ok=True)
     out = DIST / "recipe-table.skill"
+    files = [(f, f.relative_to(SKILL_DIR.parent)) for f in sorted(SKILL_DIR.rglob("*"))
+             if f.is_file() and "__pycache__" not in f.parts]
+    files += [(ROOT / e, Path(SKILL_DIR.name, "assets/examples", Path(e).name)) for e in EXAMPLES]
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
-        for f in sorted(SKILL_DIR.rglob("*")):
-            if f.is_file() and "__pycache__" not in f.parts:
-                z.write(f, f.relative_to(SKILL_DIR.parent))
+        for f, arc in files:
+            info = zipfile.ZipInfo(arc.as_posix(), FIXED_TIME)
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.external_attr = 0o644 << 16
+            z.writestr(info, f.read_bytes())
     return out
 
 
