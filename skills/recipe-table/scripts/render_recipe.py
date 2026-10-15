@@ -12,6 +12,7 @@ import os
 import subprocess
 import sys
 import tempfile
+from itertools import permutations, product
 from decimal import ROUND_HALF_UP, Decimal
 
 import yaml
@@ -24,6 +25,20 @@ r = yaml.safe_load(open(src, encoding="utf-8"))
 ING, STEPS = r["ingredients"], r["steps"]
 SERV = r.get("servings") or 1
 E = html.escape
+# A split step takes one ingredient and gives several parts that go separate ways (separate eggs into
+# yolks and whites, cut scallions into whites and greens). Its parts are referenced by their own ids.
+clash = sorted(set(ING) & set(STEPS))
+assert not clash, f"same id for an ingredient and a step: {clash}"
+OUT = {}
+for k, s in STEPS.items():
+    for o, v in (s.get("out") or {}).items():
+        assert o not in ING and o not in STEPS and o not in OUT, f"{k}: output id {o} is already taken"
+        OUT[o] = dict(v) if isinstance(v, dict) else {"name": v}
+        OUT[o]["_from"] = k
+SPLIT = {k: s for k, s in STEPS.items() if s.get("out")}
+for k, s in SPLIT.items():
+    assert len(s["out"]) >= 2, f"{k}: a split step needs at least two parts in out"
+    assert len(s.get("in") or []) == 1 and s["in"][0] in ING, f"{k}: a split step takes exactly one ingredient"
 
 # ---------- language ----------
 UNIT_EN = {"个": "", "撮": "pinch", "片": "slices", "勺": "scoop", "根": "", "瓣": "cloves"}
@@ -37,7 +52,7 @@ def T(obj, key, where):
     return obj.get(key + "_en", "")
 TITLE = T(r, "title", "recipe")
 SNAME = r.get("serving_name_en", "serving") if EN else r.get("serving_name", "份")
-for k, i in ING.items():
+for k, i in list(ING.items()) + list(OUT.items()):
     i["_name"], i["_note"] = T(i, "name", k), T(i, "note", k)
     u = i.get("unit", "")
     i["_unit"] = (i.get("unit_en", UNIT_EN.get(u, u)) if EN else u)
@@ -51,7 +66,8 @@ for k, s in STEPS.items():
     s.setdefault("in", [])
     s.setdefault("after", [])
     for c in s["in"] + s["after"]:
-        assert c in ING or c in STEPS, f"{k}: unknown input {c}"
+        assert c in ING or c in STEPS or c in OUT, f"{k}: unknown input {c}"
+        assert c not in SPLIT, f"{k}: use the parts of split step {c} ({', '.join(SPLIT[c]['out'])}), not the step itself"
     s["phase"] = s.get("phase") or ("wait" if s.get("passive") else "prep")
     assert s["phase"] in ("prep", "wait", "heat"), f"{k}: phase must be prep/wait/heat"
 uses = [c for s in STEPS.values() for c in s["in"]]
@@ -59,123 +75,15 @@ dup = sorted({c for c in uses if uses.count(c) > 1})
 assert not dup, f"used by more than one step (split them): {dup}"
 used = set(uses)
 # table = steps that consume something or are consumed; a step with neither only shows on the timeline
-TREE = {k: s for k, s in STEPS.items() if s["in"] or k in used}
+TREE = {k: s for k, s in STEPS.items() if k not in SPLIT and (s["in"] or k in used)}
 roots = [k for k in TREE if k not in used]
 assert len(roots) == 1, f"need exactly one final step, got {roots}"
 root = roots[0]
-unused = [k for k in ING if k not in used]
-assert not unused, f"ingredients never used: {unused}"
+unused = [k for k in list(ING) + list(OUT) if k not in used]
+assert not unused, f"ingredients or split parts never used: {unused}"
 for k, i in ING.items():
     if "nut" in i:
         assert len(i["nut"]) == 6, f"{k}: nut needs 6 numbers [kcal,P,C,F,fiber,Na]"
-
-# ---------- table layout ----------
-# Steps sit as far right as possible (one column left of the step they feed), so a side branch
-# like "heat the pan with butter" lines up under the step it runs alongside; ingredient cells and
-# input-less steps start at column 0 and stretch right to meet their parent.
-parent = {c: k for k, s in TREE.items() for c in s["in"]}
-depth = {root: 0}
-def walk(k):
-    for c in TREE[k]["in"] if k in TREE else []:
-        depth[c] = depth[k] + 1
-        walk(c)
-walk(root)
-LAST = 1 + max(depth[k] for k in TREE)
-col = {k: (0 if k in ING or not TREE[k]["in"] else LAST - depth[k]) for k in depth}
-leaves = []
-def dfs(k):
-    if k in ING or not TREE[k]["in"]:
-        leaves.append(k)
-    else:
-        for c in TREE[k]["in"]:
-            dfs(c)
-dfs(root)
-memo = {}
-def leafset(k):
-    if k not in memo:
-        memo[k] = [k] if (k in ING or not TREE[k]["in"]) else [l for c in TREE[k]["in"] for l in leafset(c)]
-    return memo[k]
-
-def qty(i):
-    q = i.get("qty", "")
-    q = int(q) if isinstance(q, float) and q.is_integer() else q
-    return f"{q} {i['_unit']}".strip()
-
-def dur(s):
-    m = s.get("min")
-    return "" if m is None else f"{m} min"
-
-def textw(s, px):
-    """Rough rendered width of a string: CJK glyphs are square, Latin about 0.56 em."""
-    return sum(px if ord(ch) > 0x2E80 else px * 0.56 for ch in str(s))
-
-def layout(scale, ing_px, font):
-    """Physical table columns and each cell's left edge.
-
-    Column 0 holds ingredients, sized to the longest name + quantity so names don't wrap.
-    Every step column gets width scale(minutes) of its longest step. When a column holds a
-    shorter step too (heat the pan 3 min under rest 7 min), the column is split into right-
-    aligned sub-columns so the shorter step is drawn narrower and its input cell stretches
-    to meet it, like a timeline.
-    """
-    lo_ing, hi_ing = ing_px
-    single = [k for k in ING if col[parent[k]] == 1] or list(ING)
-    need = max(textw(ING[k]["_name"], font) + textw(qty(ING[k]), font) for k in single) + 40
-    widths, starts, groups = [max(lo_ing, min(hi_ing, round(need)))], {0: 0}, {}
-    for c in range(1, LAST + 1):
-        cum, idx = [], {}
-        for d in sorted({STEPS[k].get("min") or 0 for k in TREE if col[k] == c}):
-            w = scale(d)
-            if cum and w - cum[-1] < 24:   # too close to be worth a separate sliver
-                cum[-1] = max(cum[-1], w)
-            else:
-                cum.append(w)
-            idx[d] = len(cum) - 1
-        starts[c], groups[c] = len(widths), (len(cum), idx)
-        widths += [cum[i] - cum[i - 1] for i in range(len(cum) - 1, 0, -1)] + [cum[0]]
-    left = {}
-    for k in depth:
-        if k in ING or not TREE[k]["in"]:
-            left[k] = 0
-        else:
-            n, idx = groups[col[k]]
-            left[k] = starts[col[k]] + (n - 1 - idx[STEPS[k].get("min") or 0])
-    return widths, left
-
-IMG_SCALE = lambda d: max(96, min(200, 44 + 22 * d))
-WIDGET_SCALE = lambda d: max(56, min(140, 28 + 14 * d))
-
-def recipe_table(cls_on=True, scale=IMG_SCALE, ing_px=(150, 300), font=14, fixed=True):
-    """Ingredient cell: name first, quantity right-aligned. Step cell: verb, then small note and time."""
-    widths, left = layout(scale, ing_px, font)
-    total_cols = len(widths)
-    rows = []
-    for l in leaves:
-        cells, k = [], l
-        while True:
-            span = len(leafset(k))
-            wid = (left[parent[k]] if k in parent else total_cols) - left[k]
-            if k in ING:
-                i = ING[k]
-                note = (f'<span class="n">{E(i["_note"])}</span>' if cls_on else f'<br><sub>{E(i["_note"])}</sub>') if i["_note"] else ""
-                if cls_on:
-                    cells.append(f'<td class="i" colspan="{wid}"><span class="q">{E(qty(i))}</span>{E(i["_name"])}{note}</td>')
-                else:
-                    cells.append(f'<td colspan="{wid}">{E(i["_name"])} <b>{E(qty(i))}</b>{note}</td>')
-            else:
-                s = TREE[k]
-                notes = [x.strip() for x in s["_note"].split("·") if x.strip()]  # one short note per line
-                small = notes + [x for x in [" · ".join(x for x in [dur(s), WAIT if s.get("passive") else ""] if x)] if x]
-                d = "".join((f'<span class="n">{E(x)}</span>' if cls_on else f'<br><sub>{E(x)}</sub>') for x in small)
-                c = f' class="s {s["phase"]} c{col[k] % 2}"' if cls_on else ""
-                cells.append(f'<td{c} rowspan="{span}" colspan="{wid}">{E(s["_action"])}{d}</td>')
-            if k not in parent or leafset(parent[k])[0] != l:
-                break
-            k = parent[k]
-        rows.append("<tr>" + "".join(cells) + "</tr>")
-    cols = "".join(f'<col style="width:{w}px">' for w in widths)
-    style = f' style="table-layout:fixed;width:{sum(widths)}px"' if fixed else ""
-    return f'<table class="cfe"{style}><colgroup>{cols}</colgroup>' + "".join(rows) + "</table>"
 
 # ---------- schedule ----------
 # One cook: hands-on steps never overlap, in the order they are listed. Passive steps (resting,
@@ -200,14 +108,186 @@ for k, s in STEPS.items():
     if not s.get("passive"):
         cook_free = start[k] + m
     end[k] = start[k] + m
+    for o in s.get("out") or {}:
+        end[o] = end[k]
 total = max(end.values())
-order = sorted(STEPS, key=lambda k: (start[k], col.get(k, 0)))
 TICK = next(t for t in (1, 2, 5, 10, 15, 30, 60) if total / t <= 8)
 ticks = list(range(0, total + 1, TICK))
 if ticks[-1] != total:
     if total - ticks[-1] < TICK / 2 + 0.01 and len(ticks) > 1:  # keep the end label from colliding with the last tick
         ticks.pop()
     ticks.append(total)
+
+# ---------- row order ----------
+# Rows run top to bottom in the order things are handled, like the timeline below the table: among
+# the inputs of one step, the one whose work starts first goes on top (a prepared branch above the
+# raw ingredients added at that step; ties keep the YAML order). The parts of a split step must sit in
+# adjacent rows so the split cell can span them, which can override the time order; then the order
+# with the fewest swaps against it wins.
+def is_leaf(k):
+    return k in ING or k in OUT or not TREE[k]["in"]
+parent = {c: k for k, s in TREE.items() for c in s["in"]}
+def first_start(k):
+    if k in ING:
+        return start[parent[k]]
+    if k in OUT:
+        return start[OUT[k]["_from"]]
+    return min([start[k]] + [first_start(c) for c in TREE[k]["in"]])
+GROUPS = [set(s["out"]) for s in SPLIT.values()]
+def fits(seq):
+    """Parts of each split are contiguous here; parts whose siblings are elsewhere sit at an end."""
+    for g in GROUPS:
+        pos = [i for i, x in enumerate(seq) if x in g]
+        if not pos:
+            continue
+        if pos[-1] - pos[0] + 1 != len(pos):
+            return False
+        if len(pos) < len(g) and pos[0] != 0 and pos[-1] != len(seq) - 1:
+            return False
+    return True
+cand_memo = {}
+def candidates(k):
+    """Best (swaps, leaf order) for each (first, last) pair of leaves; only the ends matter further up."""
+    if k in cand_memo:
+        return cand_memo[k]
+    if is_leaf(k):
+        return [(0, (k,))]
+    kids = sorted(TREE[k]["in"], key=lambda c: (first_start(c), c in ING or c in OUT))
+    rank = {c: n for n, c in enumerate(kids)}
+    best = {}
+    for perm in permutations(kids):
+        swaps = sum(rank[a] > rank[b] for n, a in enumerate(perm) for b in perm[n + 1:])
+        for combo in product(*(candidates(c) for c in perm)):
+            seq = sum((q for _, q in combo), ())
+            cost = swaps + sum(c for c, _ in combo)
+            if fits(seq) and ((seq[0], seq[-1]) not in best or cost < best[(seq[0], seq[-1])][0]):
+                best[(seq[0], seq[-1])] = (cost, seq)
+    cand_memo[k] = list(best.values())
+    return cand_memo[k]
+
+# ---------- table layout ----------
+# Steps sit as far right as possible (one column left of the step they feed), so a side branch
+# like "heat the pan with butter" lines up under the step it runs alongside; ingredient cells and
+# input-less steps start at column 0 and stretch right to meet their parent.
+found = candidates(root)
+assert found, "the parts of a split step can't all sit in adjacent rows; split the ingredient into separate ones instead"
+leaves = min(found, key=lambda x: x[0])[1]
+row = {l: n for n, l in enumerate(leaves)}
+memo = {}
+def leafset(k):
+    if k not in memo:
+        memo[k] = [k] if is_leaf(k) else [l for c in TREE[k]["in"] for l in leafset(c)]
+    return memo[k]
+for s in TREE.values():  # children in row order, so each step's rows read top to bottom
+    s["in"].sort(key=lambda c: min(row[l] for l in leafset(c)))
+memo.clear()
+depth = {root: 0}
+def walk(k):
+    for c in TREE[k]["in"] if k in TREE else []:
+        depth[c] = depth[k] + 1
+        walk(c)
+walk(root)
+LAST = 1 + max(depth[k] for k in TREE)
+col = {k: (0 if is_leaf(k) else LAST - depth[k]) for k in depth}
+col.update({k: -1 for k in SPLIT})
+PRE = 2 if SPLIT else 0  # split steps get two columns on the far left: the whole ingredient, then the split
+order = sorted(STEPS, key=lambda k: (start[k], col.get(k, 0)))
+
+def ing_cell(i, cls_on, attrs):
+    note = (f'<span class="n">{E(i["_note"])}</span>' if cls_on else f'<br><sub>{E(i["_note"])}</sub>') if i["_note"] else ""
+    if cls_on:
+        q = f'<span class="q">{E(qty(i))}</span>' if qty(i) else ""
+        return f'<td class="i"{attrs}>{q}{E(i["_name"])}{note}</td>'
+    q = f' <b>{E(qty(i))}</b>' if qty(i) else ""
+    return f'<td{attrs}>{E(i["_name"])}{q}{note}</td>'
+
+def step_cell(k, s, cls_on, attrs):
+    notes = [x.strip() for x in s["_note"].split("·") if x.strip()]  # one short note per line
+    small = notes + [x for x in [" · ".join(x for x in [dur(s), WAIT if s.get("passive") else ""] if x)] if x]
+    d = "".join((f'<span class="n">{E(x)}</span>' if cls_on else f'<br><sub>{E(x)}</sub>') for x in small)
+    c = f' class="s {s["phase"]} c{col[k] % 2}"' if cls_on else ""
+    return f'<td{c}{attrs}>{E(s["_action"])}{d}</td>'
+
+def qty(i):
+    q = i.get("qty", "")
+    q = int(q) if isinstance(q, float) and q.is_integer() else q
+    return f"{q} {i['_unit']}".strip()
+
+def dur(s):
+    m = s.get("min")
+    return "" if m is None else f"{m} min"
+
+def textw(s, px):
+    """Rough rendered width of a string: CJK glyphs are square, Latin about 0.56 em."""
+    return sum(px if ord(ch) > 0x2E80 else px * 0.56 for ch in str(s))
+
+def layout(scale, ing_px, font):
+    """Physical table columns and each cell's left edge.
+
+    Column 0 holds ingredients, sized to the longest name + quantity so names don't wrap.
+    Every step column gets width scale(minutes) of its longest step. When a column holds a
+    shorter step too (heat the pan 3 min under rest 7 min), the column is split into right-
+    aligned sub-columns so the shorter step is drawn narrower and its input cell stretches
+    to meet it, like a timeline.
+    """
+    lo_ing, hi_ing = ing_px
+    item = lambda k: ING.get(k) or OUT[k]
+    fit = lambda ks: max(lo_ing, min(hi_ing, round(max(textw(item(k)["_name"], font) + textw(qty(item(k)), font) for k in ks) + 40)))
+    single = [k for k in leaves if (k in ING or k in OUT) and col[parent[k]] == 1] or [k for k in leaves if k in ING or k in OUT] or list(ING)
+    widths = ([fit([s["in"][0] for s in SPLIT.values()]), scale(max(s.get("min") or 0 for s in SPLIT.values()))] if SPLIT else [])
+    starts, groups = {0: PRE}, {}
+    widths.append(fit(single))
+    for c in range(1, LAST + 1):
+        cum, idx = [], {}
+        for d in sorted({STEPS[k].get("min") or 0 for k in TREE if col[k] == c}):
+            w = scale(d)
+            if cum and w - cum[-1] < 24:   # too close to be worth a separate sliver
+                cum[-1] = max(cum[-1], w)
+            else:
+                cum.append(w)
+            idx[d] = len(cum) - 1
+        starts[c], groups[c] = len(widths), (len(cum), idx)
+        widths += [cum[i] - cum[i - 1] for i in range(len(cum) - 1, 0, -1)] + [cum[0]]
+    left = {}
+    for k in depth:
+        if is_leaf(k):
+            left[k] = PRE if k in OUT else 0
+        else:
+            n, idx = groups[col[k]]
+            left[k] = starts[col[k]] + (n - 1 - idx[STEPS[k].get("min") or 0])
+    return widths, left
+
+IMG_SCALE = lambda d: max(96, min(200, 44 + 22 * d))
+WIDGET_SCALE = lambda d: max(56, min(140, 28 + 14 * d))
+
+def recipe_table(cls_on=True, scale=IMG_SCALE, ing_px=(150, 300), font=14, fixed=True):
+    """Ingredient cell: name first, quantity right-aligned. Step cell: verb, then small note and time."""
+    widths, left = layout(scale, ing_px, font)
+    total_cols = len(widths)
+    rows = []
+    for l in leaves:
+        cells, k = [], l
+        if l in OUT:  # first part of a split: the whole ingredient and the split step span all its parts
+            sk = OUT[l]["_from"]
+            parts = [p for p in leaves if p in SPLIT[sk]["out"]]
+            if parts[0] == l:
+                span = f' rowspan="{len(parts)}"'
+                cells.append(ing_cell(ING[SPLIT[sk]["in"][0]], cls_on, span))
+                cells.append(step_cell(sk, SPLIT[sk], cls_on, span))
+        while True:
+            span = len(leafset(k))
+            wid = (left[parent[k]] if k in parent else total_cols) - left[k]
+            if k in ING or k in OUT:
+                cells.append(ing_cell(ING.get(k) or OUT[k], cls_on, f' colspan="{wid}"'))
+            else:
+                cells.append(step_cell(k, TREE[k], cls_on, f' rowspan="{span}" colspan="{wid}"'))
+            if k not in parent or leafset(parent[k])[0] != l:
+                break
+            k = parent[k]
+        rows.append("<tr>" + "".join(cells) + "</tr>")
+    cols = "".join(f'<col style="width:{w}px">' for w in widths)
+    style = f' style="table-layout:fixed;width:{sum(widths)}px"' if fixed else ""
+    return f'<table class="cfe"{style}><colgroup>{cols}</colgroup>' + "".join(rows) + "</table>"
 
 # ---------- nutrition ----------
 NUT_LABELS = [("热量", "kcal", 1), ("蛋白质", "g", 1), ("碳水", "g", 1), ("脂肪", "g", 1), ("膳食纤维", "g", 1), ("钠", "mg", 1)]
@@ -351,7 +431,7 @@ h1{{font-size:24px;font-weight:bold;margin:0 0 6px;letter-spacing:.5px}}
 # ---------- outputs ----------
 if mode == "widget":
     vars_ = ":root{--line:var(--border-stronger);--line2:var(--border);--t2:var(--text-secondary);--t3:var(--text-muted);--fg2:var(--text-primary)}"
-    summary = f'{E(TITLE)}：{len(ING)} 种材料，{len(TREE)} 个步骤，约 {total} 分钟'
+    summary = f'{E(TITLE)}：{len(ING)} 种材料，{len(TREE) + len(SPLIT)} 个步骤，约 {total} 分钟'
     doc = (f"<style>{vars_}{CSS}</style><h2 class=\"sr-only\">{summary}</h2>"
            f'<div class="sum">{E(summary_line())}</div>'
            f'<div class="wrap">{recipe_table(scale=WIDGET_SCALE, ing_px=(110, 220), font=13)}</div>{timeline()}{nutrition_html()}')
@@ -396,4 +476,4 @@ else:
 if doc is not None:
     open(out, "w", encoding="utf-8").write(doc)
 nut_s = f", {fmt(nut_total[0] / SERV, 1)} kcal/{SNAME}" if has_nut else ""
-print(f"ok: {len(ING)} ingredients, {len(TREE)} table steps, {total} min{nut_s} -> {out}")
+print(f"ok: {len(ING)} ingredients, {len(TREE) + len(SPLIT)} table steps, {total} min{nut_s} -> {out}")
