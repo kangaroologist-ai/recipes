@@ -203,9 +203,12 @@ def ing_cell(i, cls_on, attrs):
     q = f' <b>{E(qty(i))}</b>' if qty(i) else ""
     return f'<td{attrs}>{E(i["_name"])}{q}{note}</td>'
 
-def step_cell(k, s, cls_on, attrs):
+def small_lines(s):
     notes = [x.strip() for x in s["_note"].split("·") if x.strip()]  # one short note per line
-    small = notes + [x for x in [" · ".join(x for x in [dur(s), WAIT if s.get("passive") else ""] if x)] if x]
+    return notes + [x for x in [" · ".join(x for x in [dur(s), WAIT if s.get("passive") else ""] if x)] if x]
+
+def step_cell(k, s, cls_on, attrs):
+    small = small_lines(s)
     d = "".join((f'<span class="n">{E(x)}</span>' if cls_on else f'<br><sub>{E(x)}</sub>') for x in small)
     c = f' class="s {s["phase"]} c{col[k] % 2}"' if cls_on else ""
     return f'<td{c}{attrs}>{E(s["_action"])}{d}</td>'
@@ -233,16 +236,19 @@ def layout(scale, ing_px, font):
     to meet it, like a timeline.
     """
     lo_ing, hi_ing = ing_px
+    # a step column is at least as wide as its verb and its longest note line (11 px), so no line
+    # wraps and leaves a single character on its own
+    text = lambda k: round(max([textw(STEPS[k]["_action"], font)] + [textw(x, 11) for x in small_lines(STEPS[k])]) + 30)
     item = lambda k: ING.get(k) or OUT[k]
     fit = lambda ks: max(lo_ing, min(hi_ing, round(max(textw(item(k)["_name"], font) + textw(qty(item(k)), font) for k in ks) + 40)))
     single = [k for k in leaves if (k in ING or k in OUT) and col[parent[k]] == 1] or [k for k in leaves if k in ING or k in OUT] or list(ING)
-    widths = ([fit([s["in"][0] for s in SPLIT.values()]), scale(max(s.get("min") or 0 for s in SPLIT.values()))] if SPLIT else [])
+    widths = ([fit([s["in"][0] for s in SPLIT.values()]), max(max(scale(s.get("min") or 0), text(k)) for k, s in SPLIT.items())] if SPLIT else [])
     starts, groups = {0: PRE}, {}
     widths.append(fit(single))
     for c in range(1, LAST + 1):
         cum, idx = [], {}
         for d in sorted({STEPS[k].get("min") or 0 for k in TREE if col[k] == c}):
-            w = scale(d)
+            w = max([scale(d)] + [text(k) for k in TREE if col[k] == c and (STEPS[k].get("min") or 0) == d])
             if cum and w - cum[-1] < 24:   # too close to be worth a separate sliver
                 cum[-1] = max(cum[-1], w)
             else:
@@ -338,7 +344,7 @@ CSS = """.cfe{border-collapse:collapse;font-size:13px;line-height:1.35}
 .cfe .iq td{border:0;padding:0;vertical-align:middle}
 .cfe .iq .q{text-align:right;white-space:nowrap;padding-left:14px;color:var(--t2);font-variant-numeric:tabular-nums}
 .cfe .s{text-align:center;min-width:56px}
-.cfe .n{display:block;font-size:11px;color:var(--t2)}
+.cfe .n{display:block;font-size:11px;color:var(--t2);white-space:nowrap}
 .sum{font-size:13px;color:var(--t2);margin:0 0 10px}
 .gt{display:grid;grid-template-columns:auto 1fr;font-size:13px;margin-top:20px}
 .gt .lab{white-space:nowrap;color:var(--t2);padding:5px 12px 5px 0;border-bottom:0.5px solid var(--line2)}
