@@ -20,6 +20,6 @@ steps:
   wet:   {action: 搅匀, action_en: Mix, in: [egg, yog, milk], min: 1}
   mix:   {action: 拌合, action_en: Mix, in: [wet, whey, flour, allu, cinn, bp, salt], min: 2}
   rest:  {action: 静置, action_en: Rest, in: [mix], min: 7, passive: true}
-  heat:  {phase: heat, action: 热锅, action_en: Preheat, in: [butter], min: 3, passive: true, end_with: rest}
+  heat:  {phase: heat, action: 热锅, action_en: Preheat, in: [butter], min: 2, passive: true, end_with: rest}
   fry:   {phase: heat, action: 煎, action_en: Cook, note: 小火加盖, note_en: low heat · covered, in: [rest, heat], min: 2}
   flip:  {phase: heat, action: 翻面, action_en: Flip, in: [fry], min: 2}

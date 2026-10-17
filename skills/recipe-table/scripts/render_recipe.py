@@ -298,7 +298,7 @@ PH = {  # fill A, fill B (alternate columns), text, timeline bar
 INK, MUTED, LINE, HAIR = "#2B241D", "#7C7266", "#5E5448", "#EAE4D9"
 
 def image_html(table_only=False):
-    track_w, lab_w = 420, 120
+    track_w = 300
     px = lambda v: round(track_w * v / total)
     grid = "".join(f'<div style="position:absolute;left:{px(t)}px;top:0;bottom:0;width:1px;background:{HAIR}"></div>' for t in ticks[1:-1])
     tl = []
@@ -312,10 +312,9 @@ def image_html(table_only=False):
     axis = "".join(f'<div style="position:absolute;left:{px(t) - 15}px;width:30px;text-align:center;top:4px">{t}</div>' for t in ticks)
     tl.append(f'<tr><td class="tl axl">{"min" if EN else "分钟"}</td><td><div style="position:relative;height:22px;width:{track_w}px;font-size:11px;color:{MUTED}">{axis}</div></td></tr>')
     step_css = "".join(f".cfe .{p}.c0{{background:{a};color:{t}}}.cfe .{p}.c1{{background:{b};color:{t}}}" for p, (a, b, t, _) in PH.items())
-    css = f"""body{{margin:0;padding:40px;background:#EFE9DF;color:{INK};font-family:"Noto Sans CJK SC","Noto Sans SC",sans-serif;width:1200px}}
+    css = f"""body{{margin:0;padding:18px;background:#EFE9DF;color:{INK};font-family:"Noto Sans CJK SC","Noto Sans SC",sans-serif;width:1200px}}
 .card{{display:inline-block;background:#FFFCF6;border:1px solid #A89B88;border-radius:6px;padding:7px;-webkit-box-shadow:0 3px 14px rgba(60,42,20,.10)}}
 .frame{{border:1px solid #DDD3C3;border-radius:3px;padding:26px 30px 30px}}
-.bar{{width:34px;height:3px;background:#B5532E;margin:0 0 14px}}
 h1{{font-size:24px;font-weight:bold;margin:0 0 6px;letter-spacing:.5px}}
 .sub{{color:{MUTED};font-size:13px;margin-bottom:20px}}
 .sec{{font-size:12px;color:{MUTED};margin:28px 0 10px;letter-spacing:2px}}
@@ -330,22 +329,25 @@ h1{{font-size:24px;font-weight:bold;margin:0 0 6px;letter-spacing:.5px}}
 .tlt{{border-collapse:collapse;font-size:13px}}
 .tlt td{{padding:0}}
 .tlt .tk{{border-bottom:1px solid {HAIR}}}
-.tl{{width:{lab_w}px;padding-right:12px !important;white-space:nowrap;border-bottom:1px solid {HAIR};color:{INK}}}
+.tl{{padding-right:14px !important;white-space:nowrap;border-bottom:1px solid {HAIR};color:{INK}}}
 .axl{{border-bottom:none !important;font-size:11px;color:{MUTED} !important}}
 .nt{{border-collapse:collapse;font-size:14px}}
+.low{{border-collapse:collapse}}
+.low .lo{{padding:0;vertical-align:top}}
 .nt th,.nt td{{border:1px solid {LINE};padding:7px 16px;text-align:left}}
 .nt th{{background:#F4EEE3;font-weight:bold}}
 .nt .v{{text-align:right}}
 .nt .u{{color:{MUTED};font-size:11px;margin-left:4px}}
 """
     table = recipe_table()
-    head = f"<div class=\"bar\"></div><h1>{E(TITLE)}</h1><div class=\"sub\">{E(summary_line())}</div>"
+    head = f"<h1>{E(TITLE)}</h1><div class=\"sub\">{E(summary_line())}</div>"
     if table_only:
         body = f"{head}{table}"
     else:
         nut = f'<div class="sec">营养成分</div>{nutrition_html()}' if has_nut else ""
-        body = (f"{head}{table}"
-                f'<div class="sec">时间线</div><table class="tlt">{"".join(tl)}</table>{nut}')
+        lower = (f'<td class="lo"><div class="sec">时间线</div><table class="tlt">{"".join(tl)}</table></td>'
+                 + (f'<td class="lo" style="padding-left:44px">{nut}</td>' if nut else ""))
+        body = f'{head}{table}<table class="low"><tr>{lower}</tr></table>'
     return f'<!doctype html><html><head><meta charset="utf-8"><style>{css}</style></head><body><div class="card"><div class="frame">{body}</div></div></body></html>'
 
 # ---------- outputs ----------
