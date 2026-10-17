@@ -243,7 +243,7 @@ def summary_line():
         if has_nut:
             parts.append(f"{kcal} kcal · {prot} g protein per {SNAME.rstrip('s')}")
         return " · ".join(parts)
-    parts = [f"约 {total} 分钟", f"{SERV} {SNAME}" if SERV > 1 else "1 份"]
+    parts = [f"约 {total} 分钟", f"{SERV} {SNAME}"]
     if has_nut:
         parts.append(f"每{SNAME} {kcal} kcal · 蛋白质 {prot} g")
     return " · ".join(parts)
@@ -298,19 +298,19 @@ PH = {  # fill A, fill B (alternate columns), text, timeline bar
 INK, MUTED, LINE, HAIR = "#2B241D", "#7C7266", "#5E5448", "#EAE4D9"
 
 def image_html(table_only=False):
-    track_w = 300
-    px = lambda v: round(track_w * v / total)
-    grid = "".join(f'<div style="position:absolute;left:{px(t)}px;top:0;bottom:0;width:1px;background:{HAIR}"></div>' for t in ticks[1:-1])
+    # timeline stretches to whatever the nutrition table leaves of the recipe table's width, so positions are %
+    pc = lambda v: f"{100 * v / total:.2f}%"
+    grid = "".join(f'<div style="position:absolute;left:{pc(t)};top:0;bottom:0;width:1px;background:{HAIR}"></div>' for t in ticks[1:-1])
     tl = []
     for k in order:
         s = STEPS[k]
         m = s.get("min") or 0
         bar = PH[s["phase"]][3]
-        tl.append(f'<tr><td class="tl">{E(s["_action"])}</td><td class="tk"><div style="position:relative;height:30px;width:{track_w}px">{grid}'
-                  f'<div style="position:absolute;left:{px(start[k])}px;width:{max(px(m), 5)}px;top:10px;height:10px;background:{bar};border-radius:2px"></div>'
+        tl.append(f'<tr><td class="tl">{E(s["_action"])}</td><td class="tk"><div style="position:relative;height:30px">{grid}'
+                  f'<div style="position:absolute;left:{pc(start[k])};width:{pc(max(m, total / 60))};top:10px;height:10px;background:{bar};border-radius:2px"></div>'
                   f'</div></td></tr>')
-    axis = "".join(f'<div style="position:absolute;left:{px(t) - 15}px;width:30px;text-align:center;top:4px">{t}</div>' for t in ticks)
-    tl.append(f'<tr><td class="tl axl">{"min" if EN else "分钟"}</td><td><div style="position:relative;height:22px;width:{track_w}px;font-size:11px;color:{MUTED}">{axis}</div></td></tr>')
+    axis = "".join(f'<div style="position:absolute;left:{pc(t)};margin-left:-15px;width:30px;text-align:center;top:4px">{t}</div>' for t in ticks)
+    tl.append(f'<tr><td class="tl axl">{"min" if EN else "分钟"}</td><td><div style="position:relative;height:22px;font-size:11px;color:{MUTED}">{axis}</div></td></tr>')
     step_css = "".join(f".cfe .{p}.c0{{background:{a};color:{t}}}.cfe .{p}.c1{{background:{b};color:{t}}}" for p, (a, b, t, _) in PH.items())
     css = f"""body{{margin:0;padding:18px;background:#EFE9DF;color:{INK};font-family:"Noto Sans CJK SC","Noto Sans SC",sans-serif;width:1200px}}
 .card{{display:inline-block;background:#FFFCF6;border:1px solid #A89B88;border-radius:6px;padding:7px;-webkit-box-shadow:0 3px 14px rgba(60,42,20,.10)}}
@@ -329,11 +329,14 @@ h1{{font-size:24px;font-weight:bold;margin:0 0 6px;letter-spacing:.5px}}
 .tlt{{border-collapse:collapse;font-size:13px}}
 .tlt td{{padding:0}}
 .tlt .tk{{border-bottom:1px solid {HAIR}}}
-.tl{{padding-right:14px !important;white-space:nowrap;border-bottom:1px solid {HAIR};color:{INK}}}
+.tl{{width:1px;padding-right:14px !important;white-space:nowrap;border-bottom:1px solid {HAIR};color:{INK}}}
 .axl{{border-bottom:none !important;font-size:11px;color:{MUTED} !important}}
 .nt{{border-collapse:collapse;font-size:14px}}
 .low{{border-collapse:collapse}}
-.low .lo{{padding:0;vertical-align:top}}
+.low .lo{{padding:0;vertical-align:middle}}
+.low .nut{{width:1px;padding-left:48px}}
+.low .nut td,.low .nut th{{white-space:nowrap}}
+.tlt{{width:100%}}
 .nt th,.nt td{{border:1px solid {LINE};padding:7px 16px;text-align:left}}
 .nt th{{background:#F4EEE3;font-weight:bold}}
 .nt .v{{text-align:right}}
@@ -344,10 +347,10 @@ h1{{font-size:24px;font-weight:bold;margin:0 0 6px;letter-spacing:.5px}}
     if table_only:
         body = f"{head}{table}"
     else:
-        nut = f'<div class="sec">营养成分</div>{nutrition_html()}' if has_nut else ""
-        lower = (f'<td class="lo"><div class="sec">时间线</div><table class="tlt">{"".join(tl)}</table></td>'
-                 + (f'<td class="lo" style="padding-left:44px">{nut}</td>' if nut else ""))
-        body = f'{head}{table}<table class="low"><tr>{lower}</tr></table>'
+        nut = f'<div class="sec">{"Nutrition" if EN else "营养成分"}</div>{nutrition_html()}' if has_nut else ""
+        lower = (f'<td class="lo"><div class="sec">{"Timeline" if EN else "时间线"}</div><table class="tlt">{"".join(tl)}</table></td>'
+                 + (f'<td class="lo nut">{nut}</td>' if nut else ""))
+        body = f'{head}{table}<table class="low" style="width:{sum(layout(IMG_SCALE, (150, 300), 14)[0])}px"><tr>{lower}</tr></table>'
     return f'<!doctype html><html><head><meta charset="utf-8"><style>{css}</style></head><body><div class="card"><div class="frame">{body}</div></div></body></html>'
 
 # ---------- outputs ----------

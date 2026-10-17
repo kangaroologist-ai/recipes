@@ -1,8 +1,6 @@
 title: 高蛋白松饼
 title_en: High-Protein Pancake
 servings: 1
-serving_name: 张
-serving_name_en: pancake
 # nut = 本配方用量对应的 [热量kcal, 蛋白质g, 碳水g, 脂肪g, 膳食纤维g, 钠mg]
 # 一张的量,由 10-17 做三大张的版本折算:牛奶减到 50 ml(原来偏稀),黄油 5 g,阿洛酮糖 10 g
 ingredients:
