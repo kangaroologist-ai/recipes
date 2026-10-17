@@ -289,13 +289,13 @@ def timeline():
     out.append(f'<div class="axl">分钟</div><div class="ax">{labels}</div>')
     return '<div class="gt">' + "".join(out) + "</div>"
 
-# ---------- image: a calm card; phase colours (alternating shade per column), dark borders on every cell ----------
+# ---------- image: a warm paper card; phase colours (alternating shade per column), dark borders on every cell ----------
 PH = {  # fill A, fill B (alternate columns), text, timeline bar
-    "prep": ("#E4EFEE", "#D2E5E2", "#173F3B", "#4E9089"),
-    "heat": ("#E5EAF4", "#D3DCEE", "#1F2F55", "#5468A0"),
-    "wait": ("#F1F2F4", "#E3E6EA", "#3A404B", "#A8AFBA"),
+    "prep": ("#FAEEDA", "#F4DDB2", "#5C3A0C", "#D9952E"),
+    "heat": ("#F9E6DE", "#F2CFC1", "#6B2A14", "#C9603A"),
+    "wait": ("#EFEDE7", "#E2DED5", "#46423A", "#B5AFA3"),
 }
-INK, MUTED, LINE, HAIR = "#1D2430", "#6A7383", "#4A5361", "#E2E6EC"
+INK, MUTED, LINE, HAIR = "#2B241D", "#7C7266", "#5E5448", "#EAE4D9"
 
 def image_html(table_only=False):
     track_w, lab_w = 420, 120
@@ -312,16 +312,16 @@ def image_html(table_only=False):
     axis = "".join(f'<div style="position:absolute;left:{px(t) - 15}px;width:30px;text-align:center;top:4px">{t}</div>' for t in ticks)
     tl.append(f'<tr><td class="tl axl">{"min" if EN else "分钟"}</td><td><div style="position:relative;height:22px;width:{track_w}px;font-size:11px;color:{MUTED}">{axis}</div></td></tr>')
     step_css = "".join(f".cfe .{p}.c0{{background:{a};color:{t}}}.cfe .{p}.c1{{background:{b};color:{t}}}" for p, (a, b, t, _) in PH.items())
-    css = f"""body{{margin:0;padding:40px;background:#E6EAF0;color:{INK};font-family:"Noto Sans CJK SC","Noto Sans SC",sans-serif;width:1200px}}
-.card{{display:inline-block;background:#FDFDFC;border:1px solid #8E99A8;border-radius:6px;padding:7px;-webkit-box-shadow:0 3px 14px rgba(29,36,48,.10)}}
-.frame{{border:1px solid #CBD2DC;border-radius:3px;padding:26px 30px 30px}}
-.bar{{width:34px;height:3px;background:#3F5878;margin:0 0 14px}}
+    css = f"""body{{margin:0;padding:40px;background:#EFE9DF;color:{INK};font-family:"Noto Sans CJK SC","Noto Sans SC",sans-serif;width:1200px}}
+.card{{display:inline-block;background:#FFFCF6;border:1px solid #A89B88;border-radius:6px;padding:7px;-webkit-box-shadow:0 3px 14px rgba(60,42,20,.10)}}
+.frame{{border:1px solid #DDD3C3;border-radius:3px;padding:26px 30px 30px}}
+.bar{{width:34px;height:3px;background:#B5532E;margin:0 0 14px}}
 h1{{font-size:24px;font-weight:bold;margin:0 0 6px;letter-spacing:.5px}}
 .sub{{color:{MUTED};font-size:13px;margin-bottom:20px}}
 .sec{{font-size:12px;color:{MUTED};margin:28px 0 10px;letter-spacing:2px}}
 .cfe{{border-collapse:collapse;font-size:14px;line-height:1.4}}
 .cfe td{{border:1px solid {LINE};padding:9px 12px;vertical-align:middle}}
-.cfe .i{{background:#fff;word-wrap:break-word}}
+.cfe .i{{background:#FFFDF9;word-wrap:break-word}}
 .cfe .q{{float:right;margin-left:12px;color:{MUTED};white-space:nowrap}}
 .cfe .s{{text-align:center;font-weight:bold}}
 {step_css}
@@ -334,7 +334,7 @@ h1{{font-size:24px;font-weight:bold;margin:0 0 6px;letter-spacing:.5px}}
 .axl{{border-bottom:none !important;font-size:11px;color:{MUTED} !important}}
 .nt{{border-collapse:collapse;font-size:14px}}
 .nt th,.nt td{{border:1px solid {LINE};padding:7px 16px;text-align:left}}
-.nt th{{background:#EEF1F5;font-weight:bold}}
+.nt th{{background:#F4EEE3;font-weight:bold}}
 .nt .v{{text-align:right}}
 .nt .u{{color:{MUTED};font-size:11px;margin-left:4px}}
 """
