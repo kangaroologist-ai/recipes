@@ -8,7 +8,7 @@
 | 菜谱 | 分类 | 每份 |
 |---|---|---|
 | [高蛋白法式吐司](recipes/breakfast/protein-french-toast.md) | breakfast | 200.5 kcal · 19.8 g 蛋白质 / 片 |
-| [乳清蛋白松饼(三大张)](recipes/breakfast/protein-pancake-large.md) | breakfast | 343.6 kcal · 33.5 g 蛋白质 / 张 |
+| [乳清蛋白松饼(低筋粉版)](recipes/breakfast/protein-pancake-cake-flour.md) | breakfast | 347.8 kcal · 32.9 g 蛋白质 / 张 |
 | [乳清蛋白松饼](recipes/breakfast/protein-pancake.md) | breakfast | 315.0 kcal · 34.6 g 蛋白质 / 份 |
 <!-- index:end -->
 
