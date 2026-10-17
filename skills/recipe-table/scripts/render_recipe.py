@@ -142,8 +142,8 @@ def layout(scale, ing_px, font):
             left[k] = starts[col[k]] + (n - 1 - idx[STEPS[k].get("min") or 0])
     return widths, left
 
-IMG_SCALE = lambda d: max(96, min(200, 44 + 22 * d))
-WIDGET_SCALE = lambda d: max(56, min(140, 28 + 14 * d))
+IMG_SCALE = lambda d: min(260, 70 + 26 * d)   # strictly grows with minutes up to 7 min
+WIDGET_SCALE = lambda d: min(170, 40 + 18 * d)
 
 def recipe_table(cls_on=True, scale=IMG_SCALE, ing_px=(150, 300), font=14, fixed=True):
     """Ingredient cell: name first, quantity right-aligned. Step cell: verb, then small note and time."""
