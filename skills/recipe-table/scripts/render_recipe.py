@@ -103,7 +103,9 @@ def qty(i):
 
 def dur(s):
     m = s.get("min")
-    return "" if m is None else f"{m} min"
+    if m is None:
+        return ""
+    return f"{m // 60} h" if m >= 120 and m % 60 == 0 else f"{m} min"
 
 def textw(s, px):
     """Rough rendered width of a string: CJK glyphs are square, Latin about 0.56 em."""
@@ -180,10 +182,17 @@ def recipe_table(cls_on=True, scale=IMG_SCALE, ing_px=(150, 300), font=14, fixed
 # ---------- schedule ----------
 # One cook: hands-on steps never overlap, in the order they are listed. Passive steps (resting,
 # preheating, soaking) run alongside whatever the cook is doing.
+# Steps marked `ahead` (dry overnight, marinate the day before) happen before cooking day: they stay
+# in the recipe table but are left out of the timeline and the total time.
 start, end = {}, {k: 0 for k in ING}
 cook_free = 0
 for k, s in STEPS.items():
     m = s.get("min") or 0
+    if s.get("ahead"):
+        bad = [d for d in s["in"] + s["after"] if d in STEPS and not STEPS[d].get("ahead")]
+        assert not bad, f"{k}: an ahead step can only use ingredients or other ahead steps, not {bad}"
+        start[k] = end[k] = 0
+        continue
     for d in s["in"] + s["after"]:
         assert d in end, f"{k}: list it after {d}"
     ready = max((end[d] for d in s["in"] + s["after"]), default=0)
@@ -201,8 +210,9 @@ for k, s in STEPS.items():
         cook_free = start[k] + m
     end[k] = start[k] + m
 total = max(end.values())
-order = sorted(STEPS, key=lambda k: (start[k], col.get(k, 0)))
-TICK = next(t for t in (1, 2, 5, 10, 15, 30, 60) if total / t <= 8)
+order = sorted((k for k in STEPS if not STEPS[k].get("ahead")), key=lambda k: (start[k], col.get(k, 0)))
+TICK = next((t for t in (1, 2, 5, 10, 15, 30, 60, 120, 240) if total / t <= 8), 480)
+AHEAD = any(s.get("ahead") for s in STEPS.values())
 ticks = list(range(0, total + 1, TICK))
 if ticks[-1] != total:
     if total - ticks[-1] < TICK / 2 + 0.01 and len(ticks) > 1:  # keep the end label from colliding with the last tick
@@ -239,11 +249,11 @@ def nutrition_html():
 def summary_line():
     kcal, prot = (fmt(nut_total[0] / SERV, 1), fmt(nut_total[1] / SERV, 1)) if has_nut else (None, None)
     if EN:
-        parts = [f"~{total} min", f"{SERV} {SNAME}" if SERV > 1 else f"1 {SNAME}"]
+        parts = [f"~{total} min" + (" + day-before prep" if AHEAD else ""), f"{SERV} {SNAME}" if SERV > 1 else f"1 {SNAME}"]
         if has_nut:
             parts.append(f"{kcal} kcal · {prot} g protein per {SNAME.rstrip('s')}")
         return " · ".join(parts)
-    parts = [f"约 {total} 分钟", f"{SERV} {SNAME}" if SERV > 1 else "1 份"]
+    parts = [f"约 {total} 分钟" + ("（另需提前一天准备）" if AHEAD else ""), f"{SERV} {SNAME}" if SERV > 1 else "1 份"]
     if has_nut:
         parts.append(f"每{SNAME} {kcal} kcal · 蛋白质 {prot} g")
     return " · ".join(parts)
