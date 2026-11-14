@@ -59,7 +59,6 @@ for k, i in list(ING.items()) + list(OUT.items()):
 for k, s in STEPS.items():
     s["_action"], s["_note"] = T(s, "action", k), T(s, "note", k)
 assert not missing, "missing English: " + ", ".join(missing)
-WAIT = "wait" if EN else "等待"
 
 # ---------- checks ----------
 for k, s in STEPS.items():
@@ -223,7 +222,7 @@ def ing_cell(i, cls_on, attrs):
 
 def small_lines(s):
     notes = [x.strip() for x in s["_note"].split("·") if x.strip()]  # one short note per line
-    return notes + [x for x in [" · ".join(x for x in [dur(s), WAIT if s.get("passive") else ""] if x)] if x]
+    return notes + ([dur(s)] if dur(s) else [])  # no "wait" label: the colour already marks passive steps
 
 def step_cell(k, s, cls_on, attrs):
     small = small_lines(s)
@@ -283,7 +282,9 @@ def layout(scale, ing_px, font):
     # Other cells that start at the ingredient column (ingredients, preheat) stretch over these columns.
     ahead = [k for k in TREE if TREE[k].get("ahead")]
     levels = sorted({col[k] for k in ahead})
-    extra = [max(max(scale(TREE[k].get("min") or 0), text(k)) for k in ahead if col[k] == lv) for lv in levels]
+    # an overnight step (2 h or more) is drawn twice the widest same-day cell, so it reads as the longest
+    extra = [max(max((2 if (TREE[k].get("min") or 0) >= 120 else 1) * scale(TREE[k].get("min") or 0), text(k))
+                 for k in ahead if col[k] == lv) for lv in levels]
     widths[PRE + 1:PRE + 1] = extra
     starts = {c: v + (len(extra) if c else 0) for c, v in starts.items()}
     left = {}
