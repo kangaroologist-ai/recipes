@@ -3,27 +3,69 @@ usage: render_recipe.py recipe.yaml OUT [--widget|--page|--md|--png]
   --widget  inline fragment for the chat visualizer (default)
   --page    standalone HTML page
   --md      GitHub markdown (raw HTML table + mermaid gantt + nutrition table)
-  --png     shareable image (needs wkhtmltoimage + a CJK font)
+  --png     shareable image, 2x (needs Chrome/Chromium, or wkhtmltoimage as a fallback, + a CJK font)
   --table-png  image with only title, summary line and the recipe table
   --en      (add to --table-png) English version, from the *_en fields in the YAML
 """
 import html
+import math
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
+from itertools import permutations, product
 from decimal import ROUND_HALF_UP, Decimal
 
 import yaml
 
+def _fail(kind, err, tb):  # a broken recipe gets one readable line, not a traceback
+    if kind is AssertionError:
+        sys.exit(f"error: {err}")
+    sys.__excepthook__(kind, err, tb)
+sys.excepthook = _fail
+
+assert len(sys.argv) >= 3, "usage: render_recipe.py recipe.yaml OUT [--widget|--page|--md|--png|--table-png] [--en]"
 src, out = sys.argv[1], sys.argv[2]
 flags = sys.argv[3:]
 EN = "--en" in flags
 mode = next((f for f in flags if f != "--en"), "--widget").lstrip("-")
 r = yaml.safe_load(open(src, encoding="utf-8"))
+assert isinstance(r, dict) and r.get("title") and r.get("ingredients") and r.get("steps"), "the recipe needs title, ingredients and steps"
 ING, STEPS = r["ingredients"], r["steps"]
 SERV = r.get("servings") or 1
 E = html.escape
+# a misspelt field (pasive, endwith) would otherwise be ignored silently and give a wrong table or timeline
+TOP_KEYS = {"title", "title_en", "servings", "serving_name", "serving_name_en", "ingredients", "steps"}
+ING_KEYS = {"name", "name_en", "qty", "qty_en", "unit", "unit_en", "note", "note_en", "nut", "src"}
+STEP_KEYS = {"action", "action_en", "note", "note_en", "in", "min", "passive", "phase", "after", "end_with", "start_with", "ahead", "out"}
+bad = sorted(set(r) - TOP_KEYS)
+assert not bad, f"unknown top-level field: {bad}"
+for k, i in ING.items():
+    assert isinstance(i, dict) and i.get("name"), f"{k}: an ingredient needs a name"
+    bad = sorted(set(i) - ING_KEYS)
+    assert not bad, f"{k}: unknown field {bad}"
+for k, s in STEPS.items():
+    assert isinstance(s, dict) and s.get("action"), f"{k}: a step needs an action"
+    bad = sorted(set(s) - STEP_KEYS)
+    assert not bad, f"{k}: unknown field {bad}"
+    assert isinstance(s.get("min"), int) and s["min"] > 0, f"{k}: min must be a whole number of minutes, at least 1"
+    for f in ("in", "after"):
+        assert isinstance(s.get(f) or [], list), f"{k}: {f} must be a list"
+# A split step takes one ingredient and gives several parts that go separate ways (separate eggs into
+# yolks and whites, cut scallions into whites and greens). Its parts are referenced by their own ids.
+clash = sorted(set(ING) & set(STEPS))
+assert not clash, f"same id for an ingredient and a step: {clash}"
+OUT = {}
+for k, s in STEPS.items():
+    for o, v in (s.get("out") or {}).items():
+        assert o not in ING and o not in STEPS and o not in OUT, f"{k}: output id {o} is already taken"
+        OUT[o] = dict(v) if isinstance(v, dict) else {"name": v}
+        OUT[o]["_from"] = k
+SPLIT = {k: s for k, s in STEPS.items() if s.get("out")}
+for k, s in SPLIT.items():
+    assert len(s["out"]) >= 2, f"{k}: a split step needs at least two parts in out"
+    assert len(s.get("in") or []) == 1 and s["in"][0] in ING, f"{k}: a split step takes exactly one ingredient"
 
 # ---------- language ----------
 UNIT_EN = {"个": "", "撮": "pinch", "片": "slices", "勺": "scoop", "根": "", "瓣": "cloves"}
@@ -37,21 +79,21 @@ def T(obj, key, where):
     return obj.get(key + "_en", "")
 TITLE = T(r, "title", "recipe")
 SNAME = r.get("serving_name_en", "serving") if EN else r.get("serving_name", "份")
-for k, i in ING.items():
+for k, i in list(ING.items()) + list(OUT.items()):
     i["_name"], i["_note"] = T(i, "name", k), T(i, "note", k)
     u = i.get("unit", "")
     i["_unit"] = (i.get("unit_en", UNIT_EN.get(u, u)) if EN else u)
 for k, s in STEPS.items():
     s["_action"], s["_note"] = T(s, "action", k), T(s, "note", k)
 assert not missing, "missing English: " + ", ".join(missing)
-WAIT = "wait" if EN else "等待"
 
 # ---------- checks ----------
 for k, s in STEPS.items():
     s.setdefault("in", [])
     s.setdefault("after", [])
     for c in s["in"] + s["after"]:
-        assert c in ING or c in STEPS, f"{k}: unknown input {c}"
+        assert c in ING or c in STEPS or c in OUT, f"{k}: unknown input {c}"
+        assert c not in SPLIT, f"{k}: use the parts of split step {c} ({', '.join(SPLIT[c]['out'])}), not the step itself"
     s["phase"] = s.get("phase") or ("wait" if s.get("passive") else "prep")
     assert s["phase"] in ("prep", "wait", "heat"), f"{k}: phase must be prep/wait/heat"
 uses = [c for s in STEPS.values() for c in s["in"]]
@@ -59,21 +101,125 @@ dup = sorted({c for c in uses if uses.count(c) > 1})
 assert not dup, f"used by more than one step (split them): {dup}"
 used = set(uses)
 # table = steps that consume something or are consumed; a step with neither only shows on the timeline
-TREE = {k: s for k, s in STEPS.items() if s["in"] or k in used}
+TREE = {k: s for k, s in STEPS.items() if k not in SPLIT and (s["in"] or k in used)}
 roots = [k for k in TREE if k not in used]
 assert len(roots) == 1, f"need exactly one final step, got {roots}"
 root = roots[0]
-unused = [k for k in ING if k not in used]
-assert not unused, f"ingredients never used: {unused}"
+unused = [k for k in list(ING) + list(OUT) if k not in used]
+assert not unused, f"ingredients or split parts never used: {unused}"
 for k, i in ING.items():
     if "nut" in i:
         assert len(i["nut"]) == 6, f"{k}: nut needs 6 numbers [kcal,P,C,F,fiber,Na]"
+
+# ---------- schedule ----------
+# One cook: hands-on steps never overlap, in the order they are listed. Passive steps (resting,
+# preheating, soaking) run alongside whatever the cook is doing.
+# Steps marked `ahead` (dry overnight, marinate the day before) happen before cooking day: they stay
+# in the recipe table but are left out of the timeline and the total time.
+start, end = {}, {k: 0 for k in ING}
+cook_free = 0
+for k, s in STEPS.items():
+    m = s.get("min") or 0
+    if s.get("ahead"):
+        bad = [d for d in s["in"] + s["after"] if d in STEPS and not STEPS[d].get("ahead")]
+        assert not bad, f"{k}: an ahead step can only use ingredients or other ahead steps, not {bad}"
+        start[k] = end[k] = -1  # before cooking day: sorts its rows first, kept off the timeline
+        continue
+    for d in s["in"] + s["after"]:
+        assert d in end, f"{k}: list it after {d}"
+    ready = max([0] + [end[d] for d in s["in"] + s["after"]])
+    if s.get("end_with") or s.get("start_with"):
+        ref = s.get("end_with") or s.get("start_with")
+        assert ref in end, f"{k}: list it after {ref}"
+        assert s.get("passive"), f"{k}: end_with/start_with only for passive steps (preheat, soak...)"
+        start[k] = end[ref] - m if s.get("end_with") else start[ref]
+        assert start[k] >= ready, f"{k}: would start before its inputs are ready"
+    else:
+        start[k] = ready
+        if not s.get("passive"):
+            start[k] = max(start[k], cook_free)
+    if not s.get("passive"):
+        cook_free = start[k] + m
+    end[k] = start[k] + m
+    for o in s.get("out") or {}:
+        end[o] = end[k]
+total = max(end.values())
+TICK = next((t for t in (1, 2, 5, 10, 15, 30, 60, 120, 240) if total / t <= 8), 480)
+AHEAD = any(s.get("ahead") for s in STEPS.values())
+ticks = list(range(0, total + 1, TICK))
+if ticks[-1] != total:
+    if total - ticks[-1] < TICK / 2 + 0.01 and len(ticks) > 1:  # keep the end label from colliding with the last tick
+        ticks.pop()
+    ticks.append(total)
+
+# ---------- row order ----------
+# Rows run top to bottom in the order things are handled, like the timeline below the table: among
+# the inputs of one step, the one whose work starts first goes on top (a prepared branch above the
+# raw ingredients added at that step; ties keep the YAML order). The parts of a split step must sit in
+# adjacent rows so the split cell can span them, which can override the time order; then the order
+# with the fewest swaps against it wins.
+def is_leaf(k):
+    return k in ING or k in OUT or not TREE[k]["in"]
+parent = {c: k for k, s in TREE.items() for c in s["in"]}
+def first_start(k):
+    if k in ING:
+        return start[parent[k]]
+    if k in OUT:
+        return start[OUT[k]["_from"]]
+    return min([start[k]] + [first_start(c) for c in TREE[k]["in"]])
+GROUPS = [set(s["out"]) for s in SPLIT.values()]
+def leafset0(k):
+    return [k] if is_leaf(k) else [l for c in TREE[k]["in"] for l in leafset0(c)]
+def fits(seq):
+    """Parts of each split are contiguous here; parts whose siblings are elsewhere sit at an end."""
+    for g in GROUPS:
+        pos = [i for i, x in enumerate(seq) if x in g]
+        if not pos:
+            continue
+        if pos[-1] - pos[0] + 1 != len(pos):
+            return False
+        if len(pos) < len(g) and pos[0] != 0 and pos[-1] != len(seq) - 1:
+            return False
+    return True
+cand_memo = {}
+def candidates(k):
+    """Best (swaps, leaf order) for each (first, last) pair of leaves; only the ends matter further up."""
+    if k in cand_memo:
+        return cand_memo[k]
+    if is_leaf(k):
+        return [(0, (k,))]
+    kids = sorted(TREE[k]["in"], key=lambda c: (first_start(c), c in ING or c in OUT))
+    rank = {c: n for n, c in enumerate(kids)}
+    # only inputs holding parts of a split can need to move; without any, the time order stands
+    # (and a stew with a dozen ingredients doesn't go through every permutation)
+    bound = any(set(leafset0(c)) & g for c in kids for g in GROUPS)
+    best = {}
+    for perm in (permutations(kids) if bound else [tuple(kids)]):
+        swaps = sum(rank[a] > rank[b] for n, a in enumerate(perm) for b in perm[n + 1:])
+        for combo in product(*(candidates(c) for c in perm)):
+            seq = sum((q for _, q in combo), ())
+            cost = swaps + sum(c for c, _ in combo)
+            if fits(seq) and ((seq[0], seq[-1]) not in best or cost < best[(seq[0], seq[-1])][0]):
+                best[(seq[0], seq[-1])] = (cost, seq)
+    cand_memo[k] = list(best.values())
+    return cand_memo[k]
 
 # ---------- table layout ----------
 # Steps sit as far right as possible (one column left of the step they feed), so a side branch
 # like "heat the pan with butter" lines up under the step it runs alongside; ingredient cells and
 # input-less steps start at column 0 and stretch right to meet their parent.
-parent = {c: k for k, s in TREE.items() for c in s["in"]}
+found = candidates(root)
+assert found, "the parts of a split step can't all sit in adjacent rows; split the ingredient into separate ones instead"
+leaves = min(found, key=lambda x: x[0])[1]
+row = {l: n for n, l in enumerate(leaves)}
+memo = {}
+def leafset(k):
+    if k not in memo:
+        memo[k] = [k] if is_leaf(k) else [l for c in TREE[k]["in"] for l in leafset(c)]
+    return memo[k]
+for s in TREE.values():  # children in row order, so each step's rows read top to bottom
+    s["in"].sort(key=lambda c: min(row[l] for l in leafset(c)))
+memo.clear()
 depth = {root: 0}
 def walk(k):
     for c in TREE[k]["in"] if k in TREE else []:
@@ -81,29 +227,51 @@ def walk(k):
         walk(c)
 walk(root)
 LAST = 1 + max(depth[k] for k in TREE)
-col = {k: (0 if k in ING or not TREE[k]["in"] else LAST - depth[k]) for k in depth}
-leaves = []
-def dfs(k):
-    if k in ING or not TREE[k]["in"]:
-        leaves.append(k)
-    else:
-        for c in TREE[k]["in"]:
-            dfs(c)
-dfs(root)
-memo = {}
-def leafset(k):
-    if k not in memo:
-        memo[k] = [k] if (k in ING or not TREE[k]["in"]) else [l for c in TREE[k]["in"] for l in leafset(c)]
-    return memo[k]
+col = {k: (0 if is_leaf(k) else LAST - depth[k]) for k in depth}
+col.update({k: -1 for k in SPLIT})
+# Day-before steps (`ahead`) are placed from the left instead, right after their ingredients, so the
+# long overnight step stretches across to the step that uses it and reads as the longest one.
+height = {}
+def h(k):
+    if k not in height:
+        height[k] = 0 if is_leaf(k) else 1 + max(h(c) for c in TREE[k]["in"])
+    return height[k]
+for k in TREE:
+    if TREE[k].get("ahead"):
+        col[k] = h(k)
+PRE = 2 if SPLIT else 0  # split steps get two columns on the far left: the whole ingredient, then the split
+order = sorted((k for k in STEPS if not STEPS[k].get("ahead")), key=lambda k: (start[k], col.get(k, 0)))
+
+def ing_cell(i, cls_on, attrs):
+    note = (f'<span class="n">{E(i["_note"])}</span>' if cls_on else f'<br><sub>{E(i["_note"])}</sub>') if i["_note"] else ""
+    if cls_on:
+        # name and quantity side by side in a borderless inner table, so the quantity stays vertically
+        # centred against the name and its note (a float would stick to the first line)
+        q = f'<td class="q">{E(qty(i))}</td>' if qty(i) else ""
+        return f'<td class="i"{attrs}><table class="iq"><tr><td>{E(i["_name"])}{note}</td>{q}</tr></table></td>'
+    q = f' <b>{E(qty(i))}</b>' if qty(i) else ""
+    return f'<td{attrs}>{E(i["_name"])}{q}{note}</td>'
+
+def small_lines(s):
+    notes = [x.strip() for x in s["_note"].split("·") if x.strip()]  # one short note per line
+    return notes + ([dur(s)] if dur(s) else [])  # no "wait" label: the colour already marks passive steps
+
+def step_cell(k, s, cls_on, attrs):
+    small = small_lines(s)
+    d = "".join((f'<span class="n">{E(x)}</span>' if cls_on else f'<br><sub>{E(x)}</sub>') for x in small)
+    c = f' class="s {s["phase"]} c{col[k] % 2}"' if cls_on else ""
+    return f'<td{c}{attrs}>{E(s["_action"])}{d}</td>'
 
 def qty(i):
-    q = i.get("qty", "")
+    q = i.get("qty_en", i.get("qty", "")) if EN else i.get("qty", "")  # qty_en for words like 适量 / to taste
     q = int(q) if isinstance(q, float) and q.is_integer() else q
     return f"{q} {i['_unit']}".strip()
 
 def dur(s):
     m = s.get("min")
-    return "" if m is None else f"{m} min"
+    if m is None:
+        return ""
+    return f"{m // 60} h" if m >= 120 and m % 60 == 0 else f"{m} min"
 
 def textw(s, px):
     """Rough rendered width of a string: CJK glyphs are square, Latin about 0.56 em."""
@@ -119,31 +287,53 @@ def layout(scale, ing_px, font):
     to meet it, like a timeline.
     """
     lo_ing, hi_ing = ing_px
-    single = [k for k in ING if col[parent[k]] == 1] or list(ING)
-    need = max(textw(ING[k]["_name"], font) + textw(qty(ING[k]), font) for k in single) + 40
-    widths, starts, groups = [max(lo_ing, min(hi_ing, round(need)))], {0: 0}, {}
+    # a step column is at least as wide as its verb and its longest note line (11 px), so no line
+    # wraps and leaves a single character on its own
+    text = lambda k: round(max([textw(STEPS[k]["_action"], font)] + [textw(x, 11) for x in small_lines(STEPS[k])]) + 30)
+    item = lambda k: ING.get(k) or OUT[k]
+    fit = lambda ks: max(lo_ing, min(hi_ing, round(max(textw(item(k)["_name"], font) + textw(qty(item(k)), font) for k in ks) + 40)))
+    single = [k for k in leaves if (k in ING or k in OUT) and col[parent[k]] == 1] or [k for k in leaves if k in ING or k in OUT] or list(ING)
+    widths = ([fit([s["in"][0] for s in SPLIT.values()]), max(max(scale(s.get("min") or 0), text(k)) for k, s in SPLIT.items())] if SPLIT else [])
+    starts, groups = {0: PRE}, {}
+    widths.append(fit(single))
     for c in range(1, LAST + 1):
         cum, idx = [], {}
-        for d in sorted({STEPS[k].get("min") or 0 for k in TREE if col[k] == c}):
-            w = scale(d)
+        same_day = [k for k in TREE if col[k] == c and not TREE[k].get("ahead")]
+        for d in sorted({STEPS[k].get("min") or 0 for k in same_day}):
+            w = max([scale(d)] + [text(k) for k in same_day if (STEPS[k].get("min") or 0) == d])
             if cum and w - cum[-1] < 24:   # too close to be worth a separate sliver
                 cum[-1] = max(cum[-1], w)
             else:
                 cum.append(w)
             idx[d] = len(cum) - 1
         starts[c], groups[c] = len(widths), (len(cum), idx)
-        widths += [cum[i] - cum[i - 1] for i in range(len(cum) - 1, 0, -1)] + [cum[0]]
+        if cum:  # a column holding only day-before steps has no same-day width of its own
+            widths += [cum[i] - cum[i - 1] for i in range(len(cum) - 1, 0, -1)] + [cum[0]]
+    # Day-before steps get their own columns right after the ingredients, one per level; the last one
+    # (the overnight wait) then stretches across every same-day column up to the step that uses it.
+    # Other cells that start at the ingredient column (ingredients, preheat) stretch over these columns.
+    ahead = [k for k in TREE if TREE[k].get("ahead")]
+    levels = sorted({col[k] for k in ahead})
+    # an overnight step (2 h or more) gets 60 px more than the widest same-day cell, so it reads as the longest
+    extra = [max(max(scale(TREE[k].get("min") or 0) + (60 if (TREE[k].get("min") or 0) >= 120 else 0), text(k))
+                 for k in ahead if col[k] == lv) for lv in levels]
+    widths[PRE + 1:PRE + 1] = extra
+    starts = {c: v + (len(extra) if c else 0) for c, v in starts.items()}
     left = {}
     for k in depth:
-        if k in ING or not TREE[k]["in"]:
-            left[k] = 0
+        if k in TREE and TREE[k].get("ahead"):
+            left[k] = PRE + 1 + levels.index(col[k])
+        elif is_leaf(k):
+            left[k] = PRE if k in OUT else 0
         else:
             n, idx = groups[col[k]]
             left[k] = starts[col[k]] + (n - 1 - idx[STEPS[k].get("min") or 0])
     return widths, left
 
-IMG_SCALE = lambda d: max(96, min(200, 44 + 22 * d))
-WIDGET_SCALE = lambda d: max(56, min(140, 28 + 14 * d))
+# Strictly grows with minutes: linear up to 7 min (150 px), then slowly (log) so a 70-min roast is still
+# clearly wider than a 10-min boil, capped at 260 px.
+IMG_SCALE = lambda d: min(260, 52 + 14 * d if d <= 7 else 150 + 40 * math.log2(d / 7))
+WIDGET_SCALE = lambda d: min(200, 40 + 18 * d if d <= 7 else 166 + 30 * math.log2(d / 7))
 
 def recipe_table(cls_on=True, scale=IMG_SCALE, ing_px=(150, 300), font=14, fixed=True):
     """Ingredient cell: name first, quantity right-aligned. Step cell: verb, then small note and time."""
@@ -152,23 +342,20 @@ def recipe_table(cls_on=True, scale=IMG_SCALE, ing_px=(150, 300), font=14, fixed
     rows = []
     for l in leaves:
         cells, k = [], l
+        if l in OUT:  # first part of a split: the whole ingredient and the split step span all its parts
+            sk = OUT[l]["_from"]
+            parts = [p for p in leaves if p in SPLIT[sk]["out"]]
+            if parts[0] == l:
+                span = f' rowspan="{len(parts)}"'
+                cells.append(ing_cell(ING[SPLIT[sk]["in"][0]], cls_on, span))
+                cells.append(step_cell(sk, SPLIT[sk], cls_on, span))
         while True:
             span = len(leafset(k))
             wid = (left[parent[k]] if k in parent else total_cols) - left[k]
-            if k in ING:
-                i = ING[k]
-                note = (f'<span class="n">{E(i["_note"])}</span>' if cls_on else f'<br><sub>{E(i["_note"])}</sub>') if i["_note"] else ""
-                if cls_on:
-                    cells.append(f'<td class="i" colspan="{wid}"><span class="q">{E(qty(i))}</span>{E(i["_name"])}{note}</td>')
-                else:
-                    cells.append(f'<td colspan="{wid}">{E(i["_name"])} <b>{E(qty(i))}</b>{note}</td>')
+            if k in ING or k in OUT:
+                cells.append(ing_cell(ING.get(k) or OUT[k], cls_on, f' colspan="{wid}"'))
             else:
-                s = TREE[k]
-                notes = [x.strip() for x in s["_note"].split("·") if x.strip()]  # one short note per line
-                small = notes + [x for x in [" · ".join(x for x in [dur(s), WAIT if s.get("passive") else ""] if x)] if x]
-                d = "".join((f'<span class="n">{E(x)}</span>' if cls_on else f'<br><sub>{E(x)}</sub>') for x in small)
-                c = f' class="s {s["phase"]} c{col[k] % 2}"' if cls_on else ""
-                cells.append(f'<td{c} rowspan="{span}" colspan="{wid}">{E(s["_action"])}{d}</td>')
+                cells.append(step_cell(k, TREE[k], cls_on, f' rowspan="{span}" colspan="{wid}"'))
             if k not in parent or leafset(parent[k])[0] != l:
                 break
             k = parent[k]
@@ -176,38 +363,6 @@ def recipe_table(cls_on=True, scale=IMG_SCALE, ing_px=(150, 300), font=14, fixed
     cols = "".join(f'<col style="width:{w}px">' for w in widths)
     style = f' style="table-layout:fixed;width:{sum(widths)}px"' if fixed else ""
     return f'<table class="cfe"{style}><colgroup>{cols}</colgroup>' + "".join(rows) + "</table>"
-
-# ---------- schedule ----------
-# One cook: hands-on steps never overlap, in the order they are listed. Passive steps (resting,
-# preheating, soaking) run alongside whatever the cook is doing.
-start, end = {}, {k: 0 for k in ING}
-cook_free = 0
-for k, s in STEPS.items():
-    m = s.get("min") or 0
-    for d in s["in"] + s["after"]:
-        assert d in end, f"{k}: list it after {d}"
-    ready = max((end[d] for d in s["in"] + s["after"]), default=0)
-    if s.get("end_with") or s.get("start_with"):
-        ref = s.get("end_with") or s.get("start_with")
-        assert ref in end, f"{k}: list it after {ref}"
-        assert s.get("passive"), f"{k}: end_with/start_with only for passive steps (preheat, soak...)"
-        start[k] = end[ref] - m if s.get("end_with") else start[ref]
-        assert start[k] >= ready, f"{k}: would start before its inputs are ready"
-    else:
-        start[k] = ready
-        if not s.get("passive"):
-            start[k] = max(start[k], cook_free)
-    if not s.get("passive"):
-        cook_free = start[k] + m
-    end[k] = start[k] + m
-total = max(end.values())
-order = sorted(STEPS, key=lambda k: (start[k], col.get(k, 0)))
-TICK = next(t for t in (1, 2, 5, 10, 15, 30, 60) if total / t <= 8)
-ticks = list(range(0, total + 1, TICK))
-if ticks[-1] != total:
-    if total - ticks[-1] < TICK / 2 + 0.01 and len(ticks) > 1:  # keep the end label from colliding with the last tick
-        ticks.pop()
-    ticks.append(total)
 
 # ---------- nutrition ----------
 NUT_LABELS = [("热量", "kcal", 1), ("蛋白质", "g", 1), ("碳水", "g", 1), ("脂肪", "g", 1), ("膳食纤维", "g", 1), ("钠", "mg", 1)]
@@ -239,11 +394,11 @@ def nutrition_html():
 def summary_line():
     kcal, prot = (fmt(nut_total[0] / SERV, 1), fmt(nut_total[1] / SERV, 1)) if has_nut else (None, None)
     if EN:
-        parts = [f"~{total} min", f"{SERV} {SNAME}" if SERV > 1 else f"1 {SNAME}"]
+        parts = [f"~{total} min" + (" + day-before prep" if AHEAD else ""), f"{SERV} {SNAME}" if SERV > 1 else f"1 {SNAME}"]
         if has_nut:
             parts.append(f"{kcal} kcal · {prot} g protein per {SNAME.rstrip('s')}")
         return " · ".join(parts)
-    parts = [f"约 {total} 分钟", f"{SERV} {SNAME}" if SERV > 1 else "1 份"]
+    parts = [f"约 {total} 分钟" + ("（另需提前一天准备）" if AHEAD else ""), f"{SERV} {SNAME}"]
     if has_nut:
         parts.append(f"每{SNAME} {kcal} kcal · 蛋白质 {prot} g")
     return " · ".join(parts)
@@ -252,9 +407,11 @@ def summary_line():
 CSS = """.cfe{border-collapse:collapse;font-size:13px;line-height:1.35}
 .cfe td{border:1px solid var(--line);padding:6px 10px;vertical-align:middle}
 .cfe .i{word-break:break-word}
-.cfe .q{float:right;margin-left:14px;color:var(--t2);font-variant-numeric:tabular-nums}
+.cfe .iq{width:100%;border-collapse:collapse}
+.cfe .iq td{border:0;padding:0;vertical-align:middle}
+.cfe .iq .q{text-align:right;white-space:nowrap;padding-left:14px;color:var(--t2);font-variant-numeric:tabular-nums}
 .cfe .s{text-align:center;min-width:56px}
-.cfe .n{display:block;font-size:11px;color:var(--t2)}
+.cfe .n{display:block;font-size:11px;color:var(--t2);white-space:nowrap}
 .sum{font-size:13px;color:var(--t2);margin:0 0 10px}
 .gt{display:grid;grid-template-columns:auto 1fr;font-size:13px;margin-top:20px}
 .gt .lab{white-space:nowrap;color:var(--t2);padding:5px 12px 5px 0;border-bottom:0.5px solid var(--line2)}
@@ -289,40 +446,41 @@ def timeline():
     out.append(f'<div class="axl">分钟</div><div class="ax">{labels}</div>')
     return '<div class="gt">' + "".join(out) + "</div>"
 
-# ---------- image: a calm card; phase colours (alternating shade per column), dark borders on every cell ----------
+# ---------- image: a warm paper card; phase colours (alternating shade per column), dark borders on every cell ----------
 PH = {  # fill A, fill B (alternate columns), text, timeline bar
-    "prep": ("#E4EFEE", "#D2E5E2", "#173F3B", "#4E9089"),
-    "heat": ("#E5EAF4", "#D3DCEE", "#1F2F55", "#5468A0"),
-    "wait": ("#F1F2F4", "#E3E6EA", "#3A404B", "#A8AFBA"),
+    "prep": ("#FAEEDA", "#F4DDB2", "#5C3A0C", "#D9952E"),
+    "heat": ("#F9E6DE", "#F2CFC1", "#6B2A14", "#C9603A"),
+    "wait": ("#EFEDE7", "#E2DED5", "#46423A", "#B5AFA3"),
 }
-INK, MUTED, LINE, HAIR = "#1D2430", "#6A7383", "#4A5361", "#E2E6EC"
+INK, MUTED, LINE, HAIR = "#2B241D", "#7C7266", "#5E5448", "#EAE4D9"
 
 def image_html(table_only=False):
-    track_w, lab_w = 420, 120
-    px = lambda v: round(track_w * v / total)
-    grid = "".join(f'<div style="position:absolute;left:{px(t)}px;top:0;bottom:0;width:1px;background:{HAIR}"></div>' for t in ticks[1:-1])
+    # timeline stretches to whatever the nutrition table leaves of the recipe table's width, so positions are %
+    pc = lambda v: f"{100 * v / total:.2f}%"
+    grid = "".join(f'<div style="position:absolute;left:{pc(t)};top:0;bottom:0;width:1px;background:{HAIR}"></div>' for t in ticks[1:-1])
     tl = []
     for k in order:
         s = STEPS[k]
         m = s.get("min") or 0
         bar = PH[s["phase"]][3]
-        tl.append(f'<tr><td class="tl">{E(s["_action"])}</td><td class="tk"><div style="position:relative;height:30px;width:{track_w}px">{grid}'
-                  f'<div style="position:absolute;left:{px(start[k])}px;width:{max(px(m), 5)}px;top:10px;height:10px;background:{bar};border-radius:2px"></div>'
+        tl.append(f'<tr><td class="tl">{E(s["_action"])}</td><td class="tk"><div style="position:relative;height:30px">{grid}'
+                  f'<div style="position:absolute;left:{pc(start[k])};width:{pc(max(m, total / 60))};top:10px;height:10px;background:{bar};border-radius:2px"></div>'
                   f'</div></td></tr>')
-    axis = "".join(f'<div style="position:absolute;left:{px(t) - 15}px;width:30px;text-align:center;top:4px">{t}</div>' for t in ticks)
-    tl.append(f'<tr><td class="tl axl">{"min" if EN else "分钟"}</td><td><div style="position:relative;height:22px;width:{track_w}px;font-size:11px;color:{MUTED}">{axis}</div></td></tr>')
+    axis = "".join(f'<div style="position:absolute;left:{pc(t)};margin-left:-15px;width:30px;text-align:center;top:4px">{t}</div>' for t in ticks)
+    tl.append(f'<tr><td class="tl axl">{"min" if EN else "分钟"}</td><td><div style="position:relative;height:22px;font-size:11px;color:{MUTED}">{axis}</div></td></tr>')
     step_css = "".join(f".cfe .{p}.c0{{background:{a};color:{t}}}.cfe .{p}.c1{{background:{b};color:{t}}}" for p, (a, b, t, _) in PH.items())
-    css = f"""body{{margin:0;padding:40px;background:#E6EAF0;color:{INK};font-family:"Noto Sans CJK SC","Noto Sans SC",sans-serif;width:1200px}}
-.card{{display:inline-block;background:#FDFDFC;border:1px solid #8E99A8;border-radius:6px;padding:7px;-webkit-box-shadow:0 3px 14px rgba(29,36,48,.10)}}
-.frame{{border:1px solid #CBD2DC;border-radius:3px;padding:26px 30px 30px}}
-.bar{{width:34px;height:3px;background:#3F5878;margin:0 0 14px}}
+    css = f"""body{{margin:0;padding:18px;background:#EFE9DF;color:{INK};font-family:"Noto Sans CJK SC","Noto Sans SC","Source Han Sans SC","PingFang SC","Microsoft YaHei",sans-serif;width:1200px}}
+.card{{display:inline-block;background:#FFFCF6;border:1px solid #A89B88;border-radius:6px;padding:7px;-webkit-box-shadow:0 3px 14px rgba(60,42,20,.10)}}
+.frame{{border:1px solid #DDD3C3;border-radius:3px;padding:26px 30px 30px}}
 h1{{font-size:24px;font-weight:bold;margin:0 0 6px;letter-spacing:.5px}}
 .sub{{color:{MUTED};font-size:13px;margin-bottom:20px}}
 .sec{{font-size:12px;color:{MUTED};margin:28px 0 10px;letter-spacing:2px}}
 .cfe{{border-collapse:collapse;font-size:14px;line-height:1.4}}
 .cfe td{{border:1px solid {LINE};padding:9px 12px;vertical-align:middle}}
-.cfe .i{{background:#fff;word-wrap:break-word}}
-.cfe .q{{float:right;margin-left:12px;color:{MUTED};white-space:nowrap}}
+.cfe .i{{background:#FFFDF9;word-wrap:break-word}}
+.cfe .iq{{width:100%;border-collapse:collapse}}
+.cfe .iq td{{border:0;padding:0;vertical-align:middle;background:transparent}}
+.cfe .iq .q{{text-align:right;padding-left:12px;color:{MUTED};white-space:nowrap}}
 .cfe .s{{text-align:center;font-weight:bold}}
 {step_css}
 .cfe .n{{display:block;font-size:11px;font-weight:normal;margin-top:2px;opacity:.8;white-space:nowrap}}
@@ -330,28 +488,34 @@ h1{{font-size:24px;font-weight:bold;margin:0 0 6px;letter-spacing:.5px}}
 .tlt{{border-collapse:collapse;font-size:13px}}
 .tlt td{{padding:0}}
 .tlt .tk{{border-bottom:1px solid {HAIR}}}
-.tl{{width:{lab_w}px;padding-right:12px !important;white-space:nowrap;border-bottom:1px solid {HAIR};color:{INK}}}
+.tl{{width:1px;padding-right:14px !important;white-space:nowrap;border-bottom:1px solid {HAIR};color:{INK}}}
 .axl{{border-bottom:none !important;font-size:11px;color:{MUTED} !important}}
 .nt{{border-collapse:collapse;font-size:14px}}
+.low{{border-collapse:collapse}}
+.low .lo{{padding:0;vertical-align:middle}}
+.low .nut{{width:1px;padding-left:48px}}
+.low .nut td,.low .nut th{{white-space:nowrap}}
+.tlt{{width:100%}}
 .nt th,.nt td{{border:1px solid {LINE};padding:7px 16px;text-align:left}}
-.nt th{{background:#EEF1F5;font-weight:bold}}
+.nt th{{background:#F4EEE3;font-weight:bold}}
 .nt .v{{text-align:right}}
 .nt .u{{color:{MUTED};font-size:11px;margin-left:4px}}
 """
     table = recipe_table()
-    head = f"<div class=\"bar\"></div><h1>{E(TITLE)}</h1><div class=\"sub\">{E(summary_line())}</div>"
+    head = f"<h1>{E(TITLE)}</h1><div class=\"sub\">{E(summary_line())}</div>"
     if table_only:
         body = f"{head}{table}"
     else:
-        nut = f'<div class="sec">营养成分</div>{nutrition_html()}' if has_nut else ""
-        body = (f"{head}{table}"
-                f'<div class="sec">时间线</div><table class="tlt">{"".join(tl)}</table>{nut}')
+        nut = f'<div class="sec">{"Nutrition" if EN else "营养成分"}</div>{nutrition_html()}' if has_nut else ""
+        lower = (f'<td class="lo"><div class="sec">{"Timeline" if EN else "时间线"}</div><table class="tlt">{"".join(tl)}</table></td>'
+                 + (f'<td class="lo nut">{nut}</td>' if nut else ""))
+        body = f'{head}{table}<table class="low" style="width:{sum(layout(IMG_SCALE, (150, 300), 14)[0])}px"><tr>{lower}</tr></table>'
     return f'<!doctype html><html><head><meta charset="utf-8"><style>{css}</style></head><body><div class="card"><div class="frame">{body}</div></div></body></html>'
 
 # ---------- outputs ----------
 if mode == "widget":
     vars_ = ":root{--line:var(--border-stronger);--line2:var(--border);--t2:var(--text-secondary);--t3:var(--text-muted);--fg2:var(--text-primary)}"
-    summary = f'{E(TITLE)}：{len(ING)} 种材料，{len(TREE)} 个步骤，约 {total} 分钟'
+    summary = f'{E(TITLE)}：{len(ING)} 种材料，{len(TREE) + len(SPLIT)} 个步骤，约 {total} 分钟'
     doc = (f"<style>{vars_}{CSS}</style><h2 class=\"sr-only\">{summary}</h2>"
            f'<div class="sum">{E(summary_line())}</div>'
            f'<div class="wrap">{recipe_table(scale=WIDGET_SCALE, ing_px=(110, 220), font=13)}</div>{timeline()}{nutrition_html()}')
@@ -364,10 +528,25 @@ elif mode == "page":
            f"<h1 style=\"font-size:20px;margin:0 0 4px\">{E(TITLE)}</h1><div class=\"sum\">{E(summary_line())}</div>"
            f"<div class=\"wrap\">{recipe_table(scale=WIDGET_SCALE, ing_px=(110, 220), font=13)}</div>{timeline()}{nutrition_html()}</body></html>")
 elif mode in ("png", "table-png"):
+    # Chrome/Chromium first: it renders at a true 2x. wkhtmltoimage is the fallback; many builds
+    # (unpatched Qt) ignore --zoom and gave 1x images, so there the page is scaled with CSS zoom.
+    names = ("chromium", "chromium-browser", "google-chrome", "google-chrome-stable", "chrome",
+             "/opt/pw-browsers/chromium", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+    chrome = os.environ.get("RECIPE_CHROME") or next((p for p in map(shutil.which, names) if p), None)
+    page = image_html(table_only=mode == "table-png")
+    if not chrome:
+        assert shutil.which("wkhtmltoimage"), "images need Chrome/Chromium (or set RECIPE_CHROME) or wkhtmltoimage"
+        page = page.replace("<body>", '<body style="zoom:2">')
     with tempfile.NamedTemporaryFile("w", suffix=".html", delete=False, encoding="utf-8") as f:
-        f.write(image_html(table_only=mode == "table-png"))
-    subprocess.run(["wkhtmltoimage", "--quiet", "--enable-local-file-access", "--zoom", "2", "--width", "2560",
-                    "--format", "png", f.name, out], check=True, stderr=subprocess.DEVNULL)
+        f.write(page)
+    out = os.path.abspath(out)
+    if chrome:
+        subprocess.run([chrome, "--headless", "--no-sandbox", "--disable-gpu", "--hide-scrollbars",
+                        "--force-device-scale-factor=2", "--window-size=2600,4000", f"--screenshot={out}",
+                        "file://" + f.name], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        subprocess.run(["wkhtmltoimage", "--quiet", "--enable-local-file-access", "--width", "2560",
+                        "--format", "png", f.name, out], check=True, stderr=subprocess.DEVNULL)
     os.unlink(f.name)
     try:  # trim unused canvas on the right/bottom, keep a margin
         from PIL import Image, ImageChops
@@ -381,10 +560,11 @@ elif mode in ("png", "table-png"):
     doc = None
 else:
     FENCE = "`" * 3
-    g = [FENCE + "mermaid", "gantt", "dateFormat mm", "axisFormat %M", "todayMarker off"]
+    # HH:mm, not mm: a step starting at minute 63 is 01:03 (mm alone can't go past 59)
+    g = [FENCE + "mermaid", "gantt", "dateFormat HH:mm", "axisFormat " + ("%H:%M" if total >= 60 else "%M"), "todayMarker off"]
     for k in order:
         s = STEPS[k]
-        g.append(f"  {s['_action']} :{'done, ' if s.get('passive') else ''}{k}, {start[k]:02d}, {s.get('min') or 0}m")
+        g.append(f"  {s['_action']} :{'done, ' if s.get('passive') else ''}{k}, {start[k] // 60:02d}:{start[k] % 60:02d}, {s.get('min') or 0}m")
     g.append(FENCE)
     doc = (f"# {TITLE}\n\n{summary_line()}\n\n## 配方表\n\n{recipe_table(cls_on=False, fixed=False)}\n\n"
            f"## 时间线\n\n" + "\n".join(g) + "\n")
@@ -396,4 +576,4 @@ else:
 if doc is not None:
     open(out, "w", encoding="utf-8").write(doc)
 nut_s = f", {fmt(nut_total[0] / SERV, 1)} kcal/{SNAME}" if has_nut else ""
-print(f"ok: {len(ING)} ingredients, {len(TREE)} table steps, {total} min{nut_s} -> {out}")
+print(f"ok: {len(ING)} ingredients, {len(TREE) + len(SPLIT)} table steps, {total} min{nut_s} -> {out}")

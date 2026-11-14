@@ -1,8 +1,6 @@
 title: 高蛋白松饼
 title_en: High-Protein Pancake
 servings: 1
-serving_name: 张
-serving_name_en: pancake
 # nut = 本配方用量对应的 [热量kcal, 蛋白质g, 碳水g, 脂肪g, 膳食纤维g, 钠mg]
 # 一张的量,由 10-17 做三大张的版本折算:牛奶减到 50 ml(原来偏稀),黄油 5 g,阿洛酮糖 10 g
 ingredients:
@@ -20,6 +18,6 @@ steps:
   wet:   {action: 搅匀, action_en: Mix, in: [egg, yog, milk], min: 1}
   mix:   {action: 拌合, action_en: Mix, in: [wet, whey, flour, allu, cinn, bp, salt], min: 2}
   rest:  {action: 静置, action_en: Rest, in: [mix], min: 7, passive: true}
-  heat:  {phase: heat, action: 热锅, action_en: Preheat, in: [butter], min: 3, passive: true, end_with: rest}
+  heat:  {phase: heat, action: 热锅, action_en: Preheat, in: [butter], min: 2, passive: true, end_with: rest}
   fry:   {phase: heat, action: 煎, action_en: Cook, note: 小火加盖, note_en: low heat · covered, in: [rest, heat], min: 2}
   flip:  {phase: heat, action: 翻面, action_en: Flip, in: [fry], min: 2}
