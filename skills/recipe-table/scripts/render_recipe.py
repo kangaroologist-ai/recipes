@@ -3,13 +3,14 @@ usage: render_recipe.py recipe.yaml OUT [--widget|--page|--md|--png]
   --widget  inline fragment for the chat visualizer (default)
   --page    standalone HTML page
   --md      GitHub markdown (raw HTML table + mermaid gantt + nutrition table)
-  --png     shareable image (needs wkhtmltoimage + a CJK font)
+  --png     shareable image, 2x (needs Chrome/Chromium, or wkhtmltoimage as a fallback, + a CJK font)
   --table-png  image with only title, summary line and the recipe table
   --en      (add to --table-png) English version, from the *_en fields in the YAML
 """
 import html
 import math
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -18,14 +19,39 @@ from decimal import ROUND_HALF_UP, Decimal
 
 import yaml
 
+def _fail(kind, err, tb):  # a broken recipe gets one readable line, not a traceback
+    if kind is AssertionError:
+        sys.exit(f"error: {err}")
+    sys.__excepthook__(kind, err, tb)
+sys.excepthook = _fail
+
+assert len(sys.argv) >= 3, "usage: render_recipe.py recipe.yaml OUT [--widget|--page|--md|--png|--table-png] [--en]"
 src, out = sys.argv[1], sys.argv[2]
 flags = sys.argv[3:]
 EN = "--en" in flags
 mode = next((f for f in flags if f != "--en"), "--widget").lstrip("-")
 r = yaml.safe_load(open(src, encoding="utf-8"))
+assert isinstance(r, dict) and r.get("title") and r.get("ingredients") and r.get("steps"), "the recipe needs title, ingredients and steps"
 ING, STEPS = r["ingredients"], r["steps"]
 SERV = r.get("servings") or 1
 E = html.escape
+# a misspelt field (pasive, endwith) would otherwise be ignored silently and give a wrong table or timeline
+TOP_KEYS = {"title", "title_en", "servings", "serving_name", "serving_name_en", "ingredients", "steps"}
+ING_KEYS = {"name", "name_en", "qty", "qty_en", "unit", "unit_en", "note", "note_en", "nut", "src"}
+STEP_KEYS = {"action", "action_en", "note", "note_en", "in", "min", "passive", "phase", "after", "end_with", "start_with", "ahead", "out"}
+bad = sorted(set(r) - TOP_KEYS)
+assert not bad, f"unknown top-level field: {bad}"
+for k, i in ING.items():
+    assert isinstance(i, dict) and i.get("name"), f"{k}: an ingredient needs a name"
+    bad = sorted(set(i) - ING_KEYS)
+    assert not bad, f"{k}: unknown field {bad}"
+for k, s in STEPS.items():
+    assert isinstance(s, dict) and s.get("action"), f"{k}: a step needs an action"
+    bad = sorted(set(s) - STEP_KEYS)
+    assert not bad, f"{k}: unknown field {bad}"
+    assert isinstance(s.get("min"), int) and s["min"] > 0, f"{k}: min must be a whole number of minutes, at least 1"
+    for f in ("in", "after"):
+        assert isinstance(s.get(f) or [], list), f"{k}: {f} must be a list"
 # A split step takes one ingredient and gives several parts that go separate ways (separate eggs into
 # yolks and whites, cut scallions into whites and greens). Its parts are referenced by their own ids.
 clash = sorted(set(ING) & set(STEPS))
@@ -142,6 +168,8 @@ def first_start(k):
         return start[OUT[k]["_from"]]
     return min([start[k]] + [first_start(c) for c in TREE[k]["in"]])
 GROUPS = [set(s["out"]) for s in SPLIT.values()]
+def leafset0(k):
+    return [k] if is_leaf(k) else [l for c in TREE[k]["in"] for l in leafset0(c)]
 def fits(seq):
     """Parts of each split are contiguous here; parts whose siblings are elsewhere sit at an end."""
     for g in GROUPS:
@@ -162,8 +190,11 @@ def candidates(k):
         return [(0, (k,))]
     kids = sorted(TREE[k]["in"], key=lambda c: (first_start(c), c in ING or c in OUT))
     rank = {c: n for n, c in enumerate(kids)}
+    # only inputs holding parts of a split can need to move; without any, the time order stands
+    # (and a stew with a dozen ingredients doesn't go through every permutation)
+    bound = any(set(leafset0(c)) & g for c in kids for g in GROUPS)
     best = {}
-    for perm in permutations(kids):
+    for perm in (permutations(kids) if bound else [tuple(kids)]):
         swaps = sum(rank[a] > rank[b] for n, a in enumerate(perm) for b in perm[n + 1:])
         for combo in product(*(candidates(c) for c in perm)):
             seq = sum((q for _, q in combo), ())
@@ -438,7 +469,7 @@ def image_html(table_only=False):
     axis = "".join(f'<div style="position:absolute;left:{pc(t)};margin-left:-15px;width:30px;text-align:center;top:4px">{t}</div>' for t in ticks)
     tl.append(f'<tr><td class="tl axl">{"min" if EN else "分钟"}</td><td><div style="position:relative;height:22px;font-size:11px;color:{MUTED}">{axis}</div></td></tr>')
     step_css = "".join(f".cfe .{p}.c0{{background:{a};color:{t}}}.cfe .{p}.c1{{background:{b};color:{t}}}" for p, (a, b, t, _) in PH.items())
-    css = f"""body{{margin:0;padding:18px;background:#EFE9DF;color:{INK};font-family:"Noto Sans CJK SC","Noto Sans SC",sans-serif;width:1200px}}
+    css = f"""body{{margin:0;padding:18px;background:#EFE9DF;color:{INK};font-family:"Noto Sans CJK SC","Noto Sans SC","Source Han Sans SC","PingFang SC","Microsoft YaHei",sans-serif;width:1200px}}
 .card{{display:inline-block;background:#FFFCF6;border:1px solid #A89B88;border-radius:6px;padding:7px;-webkit-box-shadow:0 3px 14px rgba(60,42,20,.10)}}
 .frame{{border:1px solid #DDD3C3;border-radius:3px;padding:26px 30px 30px}}
 h1{{font-size:24px;font-weight:bold;margin:0 0 6px;letter-spacing:.5px}}
@@ -497,10 +528,25 @@ elif mode == "page":
            f"<h1 style=\"font-size:20px;margin:0 0 4px\">{E(TITLE)}</h1><div class=\"sum\">{E(summary_line())}</div>"
            f"<div class=\"wrap\">{recipe_table(scale=WIDGET_SCALE, ing_px=(110, 220), font=13)}</div>{timeline()}{nutrition_html()}</body></html>")
 elif mode in ("png", "table-png"):
+    # Chrome/Chromium first: it renders at a true 2x. wkhtmltoimage is the fallback; many builds
+    # (unpatched Qt) ignore --zoom and gave 1x images, so there the page is scaled with CSS zoom.
+    names = ("chromium", "chromium-browser", "google-chrome", "google-chrome-stable", "chrome",
+             "/opt/pw-browsers/chromium", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+    chrome = os.environ.get("RECIPE_CHROME") or next((p for p in map(shutil.which, names) if p), None)
+    page = image_html(table_only=mode == "table-png")
+    if not chrome:
+        assert shutil.which("wkhtmltoimage"), "images need Chrome/Chromium (or set RECIPE_CHROME) or wkhtmltoimage"
+        page = page.replace("<body>", '<body style="zoom:2">')
     with tempfile.NamedTemporaryFile("w", suffix=".html", delete=False, encoding="utf-8") as f:
-        f.write(image_html(table_only=mode == "table-png"))
-    subprocess.run(["wkhtmltoimage", "--quiet", "--enable-local-file-access", "--zoom", "2", "--width", "2560",
-                    "--format", "png", f.name, out], check=True, stderr=subprocess.DEVNULL)
+        f.write(page)
+    out = os.path.abspath(out)
+    if chrome:
+        subprocess.run([chrome, "--headless", "--no-sandbox", "--disable-gpu", "--hide-scrollbars",
+                        "--force-device-scale-factor=2", "--window-size=2600,4000", f"--screenshot={out}",
+                        "file://" + f.name], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        subprocess.run(["wkhtmltoimage", "--quiet", "--enable-local-file-access", "--width", "2560",
+                        "--format", "png", f.name, out], check=True, stderr=subprocess.DEVNULL)
     os.unlink(f.name)
     try:  # trim unused canvas on the right/bottom, keep a margin
         from PIL import Image, ImageChops
@@ -514,10 +560,11 @@ elif mode in ("png", "table-png"):
     doc = None
 else:
     FENCE = "`" * 3
-    g = [FENCE + "mermaid", "gantt", "dateFormat mm", "axisFormat %M", "todayMarker off"]
+    # HH:mm, not mm: a step starting at minute 63 is 01:03 (mm alone can't go past 59)
+    g = [FENCE + "mermaid", "gantt", "dateFormat HH:mm", "axisFormat " + ("%H:%M" if total >= 60 else "%M"), "todayMarker off"]
     for k in order:
         s = STEPS[k]
-        g.append(f"  {s['_action']} :{'done, ' if s.get('passive') else ''}{k}, {start[k]:02d}, {s.get('min') or 0}m")
+        g.append(f"  {s['_action']} :{'done, ' if s.get('passive') else ''}{k}, {start[k] // 60:02d}:{start[k] % 60:02d}, {s.get('min') or 0}m")
     g.append(FENCE)
     doc = (f"# {TITLE}\n\n{summary_line()}\n\n## 配方表\n\n{recipe_table(cls_on=False, fixed=False)}\n\n"
            f"## 时间线\n\n" + "\n".join(g) + "\n")

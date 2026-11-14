@@ -10,14 +10,14 @@
 
 ```mermaid
 gantt
-dateFormat mm
+dateFormat HH:mm
 axisFormat %M
 todayMarker off
-  搅匀 :wet, 00, 2m
-  浸泡 :done, soak, 02, 2m
-  热锅 :done, heat, 02, 2m
-  煎 :fry, 04, 3m
-  翻面 :flip, 07, 3m
+  搅匀 :wet, 00:00, 2m
+  浸泡 :done, soak, 00:02, 2m
+  热锅 :done, heat, 00:02, 2m
+  煎 :fry, 00:04, 3m
+  翻面 :flip, 00:07, 3m
 ```
 
 ## 营养成分

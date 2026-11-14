@@ -2,7 +2,7 @@
 regenerate the index in README.md, and package the skill.
 
 usage: python3 build.py            # all recipes + skill package
-       python3 build.py --no-png   # skip images (no wkhtmltoimage available)
+       python3 build.py --no-png   # skip images (no Chrome/Chromium or wkhtmltoimage available)
 """
 import re
 import subprocess

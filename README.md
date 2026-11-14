@@ -28,9 +28,9 @@ YAML 字段说明见 [skills/recipe-table/references/yaml-format.md](skills/reci
 ## 生成
 
 ```bash
-pip install pyyaml pillow      # 图片还需要 wkhtmltoimage 和 Noto Sans CJK 字体
+pip install pyyaml pillow      # 图片还需要 Chrome/Chromium（或 wkhtmltoimage）和 Noto Sans CJK 字体
 python3 build.py               # 渲染全部菜谱、更新上面的索引、打包 skill
-python3 build.py --no-png      # 没有 wkhtmltoimage 时只生成 .md
+python3 build.py --no-png      # 没有浏览器时只生成 .md
 ```
 
 改了 YAML 或 skill 之后跑一次再提交，保证 .md、.png 和 .skill 跟源文件一致。
