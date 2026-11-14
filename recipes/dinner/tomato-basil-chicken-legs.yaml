@@ -1,0 +1,24 @@
+title: 番茄罗勒烤鸡腿一夜干
+title_en: Dry-Brined Tomato Basil Roast Chicken
+servings: 2
+serving_name_en: servings
+# nut = 本配方用量对应的 [热量kcal, 蛋白质g, 碳水g, 脂肪g, 膳食纤维g, 钠mg]，按 USDA 估算
+# 小番茄、罗勒、橄榄油、帕玛森的量是估的；意面的钠含煮面水里吸进去的盐（估）
+ingredients:
+  chicken: {name: 鸡腿, name_en: Chicken legs, qty: 2, unit: 只, unit_en: "", note: 共约 350 g 带骨, note_en: about 350 g bone-in, nut: [486, 45, 0, 33, 0, 218], src: "USDA 鸡腿带皮生 可食约260g"}
+  salt:    {name: 盐, name_en: Salt, qty: 7, unit: g, note: 鸡重的 2%, note_en: 2% of chicken weight, nut: [0, 0, 0, 0, 0, 2713], src: 估}
+  tomato:  {name: 小番茄, name_en: Cherry tomatoes, qty: 300, unit: g, nut: [54, 2.6, 11.7, 0.6, 3.6, 15], src: "USDA#11529"}
+  garlic:  {name: 带皮蒜瓣, name_en: Unpeeled garlic cloves, qty: 8, unit: 瓣, nut: [36, 1.5, 7.9, 0.1, 0.5, 4], src: "USDA#11215 约24g"}
+  basil1:  {name: 罗勒, name_en: Basil, qty: 5, unit: g, nut: [1, 0.2, 0.1, 0, 0.1, 0], src: "USDA#02044"}
+  oil:    {name: 橄榄油, name_en: Olive oil, qty: 15, unit: ml, nut: [120, 0, 0, 13.5, 0, 0], src: "USDA#04053"}
+  pepper:  {name: 黑胡椒碎, name_en: Cracked black pepper, qty: 适量, qty_en: to taste, unit: "", nut: [3, 0.1, 0.6, 0, 0.3, 0], src: "USDA#02030"}
+  pasta:   {name: Cavatappi 意面, name_en: Cavatappi, qty: 150, unit: g, nut: [557, 19.6, 112, 2.3, 4.8, 409], src: "USDA#20120 + 吸收的盐 估"}
+  parm:    {name: 帕玛森干酪, name_en: Parmesan, qty: 15, unit: g, nut: [59, 5.4, 0.5, 3.9, 0, 228], src: "USDA#01033"}
+  basil2:  {name: 罗勒, name_en: Basil, qty: 5, unit: g, nut: [1, 0.2, 0.1, 0, 0.1, 0], src: "USDA#02044"}
+steps:
+  air:     {action: 一夜干, action_en: Dry-brine, note: 擦干抹盐 · 冷藏风干, note_en: "pat dry, salt · air-dry in fridge", in: [chicken, salt], min: 720, passive: true, ahead: true}
+  halve:   {action: 切半, action_en: Halve, in: [tomato], min: 3}
+  roast:   {phase: heat, action: 烤, action_en: Roast, note: 鸡腿皮朝上放最上面 · 170°C, note_en: "chicken on top, skin up · 170°C", in: [air, halve, garlic, basil1, oil, pepper], min: 70, passive: true}
+  cook:    {phase: heat, action: 煮, action_en: Boil, note: 留半杯面水, note_en: save ½ cup water, in: [pasta], min: 10, passive: true, end_with: roast}
+  grate:   {action: 磨碎, action_en: Grate, in: [parm], min: 1, after: [roast]}
+  toss:    {action: 拌, action_en: Toss, note: 挤出烤蒜压烂番茄, note_en: "squeeze garlic, mash tomatoes", in: [roast, cook, grate, basil2], min: 3}
