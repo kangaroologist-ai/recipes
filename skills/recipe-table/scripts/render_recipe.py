@@ -297,7 +297,7 @@ def layout(scale, ing_px, font):
             left[k] = starts[col[k]] + (n - 1 - idx[STEPS[k].get("min") or 0])
     return widths, left
 
-IMG_SCALE = lambda d: min(260, 70 + 26 * d)   # strictly grows with minutes up to 7 min
+IMG_SCALE = lambda d: min(150, 52 + 14 * d)   # strictly grows with minutes up to 7 min
 WIDGET_SCALE = lambda d: min(170, 40 + 18 * d)
 
 def recipe_table(cls_on=True, scale=IMG_SCALE, ing_px=(150, 300), font=14, fixed=True):
