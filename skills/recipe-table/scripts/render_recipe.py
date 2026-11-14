@@ -8,6 +8,7 @@ usage: render_recipe.py recipe.yaml OUT [--widget|--page|--md|--png]
   --en      (add to --table-png) English version, from the *_en fields in the YAML
 """
 import html
+import math
 import os
 import subprocess
 import sys
@@ -282,8 +283,8 @@ def layout(scale, ing_px, font):
     # Other cells that start at the ingredient column (ingredients, preheat) stretch over these columns.
     ahead = [k for k in TREE if TREE[k].get("ahead")]
     levels = sorted({col[k] for k in ahead})
-    # an overnight step (2 h or more) is drawn twice the widest same-day cell, so it reads as the longest
-    extra = [max(max((2 if (TREE[k].get("min") or 0) >= 120 else 1) * scale(TREE[k].get("min") or 0), text(k))
+    # an overnight step (2 h or more) gets 60 px more than the widest same-day cell, so it reads as the longest
+    extra = [max(max(scale(TREE[k].get("min") or 0) + (60 if (TREE[k].get("min") or 0) >= 120 else 0), text(k))
                  for k in ahead if col[k] == lv) for lv in levels]
     widths[PRE + 1:PRE + 1] = extra
     starts = {c: v + (len(extra) if c else 0) for c, v in starts.items()}
@@ -298,8 +299,10 @@ def layout(scale, ing_px, font):
             left[k] = starts[col[k]] + (n - 1 - idx[STEPS[k].get("min") or 0])
     return widths, left
 
-IMG_SCALE = lambda d: min(150, 52 + 14 * d)   # strictly grows with minutes up to 7 min
-WIDGET_SCALE = lambda d: min(170, 40 + 18 * d)
+# Strictly grows with minutes: linear up to 7 min (150 px), then slowly (log) so a 70-min roast is still
+# clearly wider than a 10-min boil, capped at 260 px.
+IMG_SCALE = lambda d: min(260, 52 + 14 * d if d <= 7 else 150 + 40 * math.log2(d / 7))
+WIDGET_SCALE = lambda d: min(200, 40 + 18 * d if d <= 7 else 166 + 30 * math.log2(d / 7))
 
 def recipe_table(cls_on=True, scale=IMG_SCALE, ing_px=(150, 300), font=14, fixed=True):
     """Ingredient cell: name first, quantity right-aligned. Step cell: verb, then small note and time."""
