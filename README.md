@@ -10,6 +10,7 @@
 | [高蛋白松饼](recipes/breakfast/high-protein-pancake.md) | breakfast | 347.8 kcal · 32.9 g 蛋白质 / 份 |
 | [高蛋白法式吐司](recipes/breakfast/protein-french-toast.md) | breakfast | 200.5 kcal · 19.8 g 蛋白质 / 片 |
 | [乳清蛋白松饼](recipes/breakfast/protein-pancake.md) | breakfast | 315.0 kcal · 34.6 g 蛋白质 / 份 |
+| [番茄罗勒烤鸡腿一夜干](recipes/dinner/tomato-basil-chicken-legs.md) | dinner | 658.5 kcal · 37.3 g 蛋白质 / 份 |
 <!-- index:end -->
 
 ## 目录结构
